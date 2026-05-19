@@ -11,6 +11,7 @@ use crate::error::{JvError, Result};
 use crate::models::{Artifact, MavenCoordinate, Version};
 use dirs::cache_dir;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -107,9 +108,22 @@ impl CacheManager {
 
     pub fn get_pom(&self, coord: &MavenCoordinate) -> Option<String> {
         let path = self.pom_path(coord);
-        fs::read_to_string(&path).ok().inspect(|_| {
-            debug!("cache hit for POM {}", coord);
-        })
+        let content = fs::read_to_string(&path).ok()?;
+
+        // Optional integrity check via sidecar hash
+        let hash_path = path.with_extension("pom.sha256");
+        if hash_path.exists() {
+            if let Ok(expected_hash) = fs::read_to_string(&hash_path) {
+                let actual = format!("{:x}", Sha256::digest(content.as_bytes()));
+                if actual != expected_hash.trim() {
+                    debug!("POM cache integrity check failed for {} — ignoring cached copy", coord);
+                    return None;
+                }
+            }
+        }
+
+        debug!("cache hit for POM {}", coord);
+        Some(content)
     }
 
     pub fn put_pom(&self, coord: &MavenCoordinate, xml: &str) -> Result<()> {
@@ -121,9 +135,15 @@ impl CacheManager {
             })?;
         }
         fs::write(&path, xml).map_err(|e| JvError::Cache {
-            path,
+            path: path.clone(),
             reason: e.to_string(),
         })?;
+
+        // Write content hash sidecar for integrity validation on future reads
+        let hash = format!("{:x}", Sha256::digest(xml.as_bytes()));
+        let hash_path = path.with_extension("pom.sha256");
+        let _ = fs::write(hash_path, hash);
+
         Ok(())
     }
 
