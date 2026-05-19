@@ -149,9 +149,15 @@ pub async fn resolve_transitive(
         }
     }
 
-    // Convert selected map into final ResolvedDependency list
+    // Convert selected map into final ResolvedDependency list.
+    // Drop any entries that still contain unresolved ${} — they indicate
+    // a property we couldn't resolve and would produce an invalid lock entry.
     let mut dependencies = Vec::new();
     for ((group, artifact), (version, original_dep)) in selected {
+        if version.raw.contains("${") {
+            debug!("dropping unresolved property version for {}:{}", group, artifact);
+            continue;
+        }
         let coord = MavenCoordinate::new(group, artifact, version);
         dependencies.push(ResolvedDependency {
             coordinate: coord,
