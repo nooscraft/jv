@@ -2,6 +2,7 @@
 //!
 //! The library provides the core resolution engine that the CLI consumes.
 
+pub mod cache;
 pub mod cli;
 pub mod error;
 pub mod models;
