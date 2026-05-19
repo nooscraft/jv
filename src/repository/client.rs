@@ -4,7 +4,7 @@
 //! (internally uses `Arc` for the underlying `reqwest::Client`).
 
 use crate::error::{JvError, Result};
-use crate::models::{MavenCoordinate, Version};
+use crate::models::{Artifact, MavenCoordinate, Version};
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Client, StatusCode, Url};
 use std::sync::Arc;
@@ -104,6 +104,48 @@ impl RepositoryClient {
         }
     }
 
+    /// Fetch raw bytes for any artifact (jar, sources, javadoc, etc.).
+    /// Tries repositories in order and returns on the first success.
+    pub async fn fetch_artifact_bytes(&self, artifact: &Artifact) -> Result<Vec<u8>> {
+        let mut remote_path = format!(
+            "{}/{}/{}-{}",
+            artifact.coordinate.path(),
+            artifact.coordinate.version,
+            artifact.coordinate.artifact_id,
+            artifact.coordinate.version
+        );
+        if let Some(classifier) = &artifact.classifier {
+            if !classifier.is_empty() {
+                remote_path.push('-');
+                remote_path.push_str(classifier);
+            }
+        }
+        remote_path.push('.');
+        remote_path.push_str(&artifact.extension);
+
+        for repo in &self.inner.repositories {
+            let url = repo
+                .url
+                .join(&remote_path)
+                .map_err(|e| JvError::Other(e.into()))?;
+
+            debug!("fetching artifact {} from {}", remote_path, repo.id);
+
+            match self.fetch_bytes(&url, &repo.id).await {
+                Ok(bytes) => return Ok(bytes),
+                Err(JvError::HttpStatus { status: 404, .. }) => continue,
+                Err(e) => {
+                    warn!("artifact fetch error from {}: {}", repo.id, e);
+                    continue;
+                }
+            }
+        }
+
+        Err(JvError::DependencyNotFound {
+            coord: artifact.coordinate.to_string(),
+        })
+    }
+
     /// Add an additional repository at runtime (lower priority than existing ones).
     pub fn add_repository(&mut self, repo: Repository) {
         // Because we use Arc we need to rebuild. For simplicity in v1 we accept the cost.
@@ -195,6 +237,35 @@ impl RepositoryClient {
         if status == StatusCode::OK {
             resp.text()
                 .await
+                .map_err(|e| JvError::Http {
+                    repo: repo_id.to_string(),
+                    source: e,
+                })
+        } else {
+            Err(JvError::HttpStatus {
+                status: status.as_u16(),
+                url: url.to_string(),
+            })
+        }
+    }
+
+    async fn fetch_bytes(&self, url: &Url, repo_id: &str) -> Result<Vec<u8>> {
+        let resp = self
+            .inner
+            .client
+            .get(url.clone())
+            .send()
+            .await
+            .map_err(|e| JvError::Http {
+                repo: repo_id.to_string(),
+                source: e,
+            })?;
+
+        let status = resp.status();
+        if status == StatusCode::OK {
+            resp.bytes()
+                .await
+                .map(|b| b.to_vec())
                 .map_err(|e| JvError::Http {
                     repo: repo_id.to_string(),
                     source: e,
