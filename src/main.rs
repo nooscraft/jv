@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
 
                 let options = jv::resolver::ResolveOptions {
                     extra_repositories: args.repositories.clone(),
-                    no_cache: args.no_cache,
+                    no_cache: args.no_cache || args.refresh,
                 };
 
                 let resolution = jv::resolver::resolve_transitive(&file, options).await?;

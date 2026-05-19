@@ -57,6 +57,11 @@ pub struct ResolveArgs {
     /// Useful when developing the resolver or when you suspect stale data.
     #[arg(long)]
     pub no_cache: bool,
+
+    /// Force refresh of POMs and metadata from remote repositories.
+    /// Similar to --no-cache but communicates intent to update cached data.
+    #[arg(long)]
+    pub refresh: bool,
 }
 
 #[derive(Args, Debug)]
