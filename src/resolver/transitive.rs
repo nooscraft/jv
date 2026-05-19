@@ -65,30 +65,29 @@ pub async fn resolve_transitive(
     // Simple progress tracking for large real-world projects (Spring Boot etc.)
     let mut processed = 0usize;
 
-    // === Build effective managed versions for the ROOT project ===
-    // This is the key improvement for real Spring Boot apps.
-    // We combine:
-    //   1. The root pom's own <dependencyManagement>
-    //   2. Managed versions coming from the root's parent chain (via EffectivePom)
+    // === Build effective managed versions + properties for the ROOT project ===
+    // This is critical for real Spring Boot apps.
     let mut root_managed: HashMap<(String, String), Version> = HashMap::new();
+    let mut root_properties: HashMap<String, String> = HashMap::new();
 
-    // 1. Root's own dependencyManagement
+    // 1. Root's own dependencyManagement + properties
     for dm in &root_pom.dependency_management {
         let key = (dm.coordinate.group_id.clone(), dm.coordinate.artifact_id.clone());
         root_managed.insert(key, dm.coordinate.version.clone());
     }
+    for (k, v) in &root_pom.properties {
+        root_properties.insert(k.clone(), v.clone());
+    }
 
-    // 2. Also pull from the root's parent chain (this is what Spring Boot parent provides)
+    // 2. Pull from the root's parent chain (Spring Boot parent + its BOMs)
     if let Some(parent) = &root_pom.parent {
         match EffectivePom::for_coordinate(parent, &client, &cache).await {
             Ok(parent_effective) => {
                 for (key, dm) in parent_effective.dependency_management {
-                    // Child (root) wins — only insert if not already present
                     root_managed.entry(key).or_insert(dm.coordinate.version.clone());
                 }
-                // Also bring properties from the parent chain
                 for (k, v) in parent_effective.properties {
-                    // We can merge them into a root-level properties map if needed later
+                    root_properties.entry(k).or_insert(v);
                 }
             }
             Err(e) => {
@@ -109,8 +108,17 @@ pub async fn resolve_transitive(
             if let Some(managed_ver) = root_managed.get(&key) {
                 dep.coordinate.version = managed_ver.clone();
             } else {
-                // Still no version after looking at root + parent chain — skip for now
-                debug!("Skipping root direct dep with unresolved version: {}", dep.coordinate);
+                // Try to resolve the version string using root + parent properties
+                let interpolated = crate::resolver::effective::interpolate(&root_properties, &dep.coordinate.version.raw);
+                if interpolated != dep.coordinate.version.raw {
+                    if let Ok(ver) = Version::parse(&interpolated) {
+                        dep.coordinate.version = ver;
+                    }
+                }
+            }
+
+            if dep.coordinate.version.raw.is_empty() || dep.coordinate.version.raw.contains("${") {
+                debug!("Skipping root direct dep with unresolved version after all attempts: {}", dep.coordinate);
                 continue;
             }
         }

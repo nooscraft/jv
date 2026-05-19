@@ -203,7 +203,7 @@ impl EffectivePom {
 }
 
 /// Very basic ${property} interpolation. Good enough for 95% of real POMs.
-fn interpolate(properties: &HashMap<String, String>, value: &str) -> String {
+pub(crate) fn interpolate(properties: &HashMap<String, String>, value: &str) -> String {
     let mut result = value.to_string();
     let mut changed = true;
     let mut guard = 0;
