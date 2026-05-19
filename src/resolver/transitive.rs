@@ -47,7 +47,8 @@ pub async fn resolve_transitive(
 
     // State for resolution
     // Keyed by (group, artifact) → the selected version and the Dependency that won
-    let mut selected: HashMap<(String, String), (Version, Dependency)> = HashMap::new();
+    // (selected_version, original_dep_declaration, immediate_parent_that_pulled_it_in)
+    let mut selected: HashMap<(String, String), (Version, Dependency, MavenCoordinate)> = HashMap::new();
 
     // Work queue item carrying context for correct exclusion propagation and tree tracking.
     #[derive(Clone)]
@@ -73,7 +74,7 @@ pub async fn resolve_transitive(
         if dep.scope.is_transitive() {
             to_visit.push_back(WorkItem {
                 dep,
-                parent: root_pom.coordinate.clone(),
+                parent: root_pom.coordinate.clone(), // direct deps are pulled by the root project itself
                 accumulated_exclusions: vec![],
             });
         }
@@ -86,7 +87,7 @@ pub async fn resolve_transitive(
         let ga = (dep.coordinate.group_id.clone(), dep.coordinate.artifact_id.clone());
 
         // Conflict resolution: nearest wins (first seen wins for the same GA)
-        if let Some((existing_version, _)) = selected.get(&ga) {
+        if let Some((existing_version, _, _)) = selected.get(&ga) {
             if !range_accepts(&dep.coordinate.version, existing_version) {
                 debug!(
                     "conflict: {} already resolved to {} but {} also requires it",
@@ -105,8 +106,8 @@ pub async fn resolve_transitive(
             chosen_version.clone(),
         );
 
-        // Record the winner (store the original declaration for scope/exclusions info)
-        selected.insert(ga.clone(), (chosen_version.clone(), dep.clone()));
+        // Record the winner + the parent that caused this node to be pulled in
+        selected.insert(ga.clone(), (chosen_version.clone(), dep.clone(), work.parent.clone()));
 
         // Avoid re-processing the exact same POM
         let visit_key = (
@@ -171,7 +172,7 @@ pub async fn resolve_transitive(
     // Drop any entries that still contain unresolved ${} — they indicate
     // a property we couldn't resolve and would produce an invalid lock entry.
     let mut dependencies = Vec::new();
-    for ((group, artifact), (version, original_dep)) in selected {
+    for ((group, artifact), (version, original_dep, pulled_by)) in selected {
         if version.raw.contains("${") {
             debug!("dropping unresolved property version for {}:{}", group, artifact);
             continue;
@@ -181,10 +182,7 @@ pub async fn resolve_transitive(
             coordinate: coord,
             scope: original_dep.scope,
             optional: original_dep.optional,
-            // For now we still point to root. Accurate per-node depended_by
-            // will be added in the next increment when we keep parent info
-            // in the selected map.
-            depended_by: Some(root_pom.coordinate.clone()),
+            depended_by: Some(pulled_by),
             artifacts: vec![],
         });
     }
