@@ -167,11 +167,25 @@ cargo test
 
 ## Status
 
-🚧 **Phase 1: In Development**
+✅ **Phase 1 Core Pipeline Working**
 
-This project is currently in active development. Phase 1 focuses on implementing the core dependency resolution functionality.
+As of the latest commits, `jv` can already deliver on the key promises:
 
-See the [implementation plan](.cursor/plans/phase_1_java_dependency_resolver_2a0c898c.plan.md) for detailed progress and roadmap.
+- Parse real `pom.xml` files
+- Resolve (direct) dependencies against Maven Central + custom repos
+- **Parallel artifact downloading** with progress bars (tokio + semaphore + indicatif)
+- **Global content cache** under `~/.cache/jv` so common deps are shared across projects
+- Generate deterministic `jv.lock` TOML lock files
+
+Example:
+```bash
+jv resolve /path/to/pom.xml
+# → downloads in parallel, writes jv.lock, reuses cache on next run
+```
+
+Full transitive dependency collection, conflict resolution (nearest-wins), Gradle support, and parent POM inheritance are the remaining high-priority items for Phase 1 completion.
+
+See git history for the incremental development (7+ meaningful commits pushed to `main`).
 
 ## Success Criteria
 
