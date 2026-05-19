@@ -37,3 +37,4 @@ version-ranges = { version = "0.1", features = ["serde"] }
 tempfile = "3"
 wiremock = "0.6"
 tokio-test = "0.4"
+insta = { version = "1.41", features = ["toml", "json"] }
