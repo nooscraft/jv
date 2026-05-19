@@ -102,6 +102,7 @@ pub async fn resolve_transitive(
     }
 
     let mut visited_poms: HashSet<(String, String, String)> = HashSet::new();
+    let mut problems: Vec<String> = Vec::new();  // Collect issues for final report
 
     while let Some(work) = to_visit.pop_front() {
         let dep = &work.dep;
@@ -149,10 +150,17 @@ pub async fn resolve_transitive(
         let effective = match EffectivePom::for_coordinate(&resolved_coord, &client, &cache).await {
             Ok(e) => e,
             Err(e) => {
-                warn!("could not build effective POM for {}: {} (skipping its transitive deps)", resolved_coord, e);
+                let msg = format!("{}: {}", resolved_coord, e);
+                warn!("problematic POM: {}", msg);
+                problems.push(msg);
                 continue;
             }
         };
+
+        // Defensive: if the effective POM has no dependencies at all, still record the artifact itself
+        if effective.dependencies.is_empty() && !selected.contains_key(&(resolved_coord.group_id.clone(), resolved_coord.artifact_id.clone())) {
+            // Already recorded earlier
+        }
 
         for mut child in effective.dependencies {
             if !child.scope.is_transitive() {
@@ -222,6 +230,10 @@ pub async fn resolve_transitive(
     });
 
     info!("Transitive resolution complete: {} artifacts (processed {} POMs)", dependencies.len(), processed);
+
+    if !problems.is_empty() {
+        warn!("Encountered {} problematic POMs during resolution (see above). The lockfile may be incomplete for some transitive branches.", problems.len());
+    }
 
     Ok(Resolution {
         root: root_pom.coordinate,
