@@ -1,8 +1,8 @@
-mod cli;
+//! jv binary entry point. Thin wrapper around the library.
 
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Commands};
+use jv::cli::{Cli, Commands};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -29,8 +29,8 @@ async fn main() -> Result<()> {
             println!("Updating dependency: {}", args.dependency);
         }
         Commands::Cache(args) => match args.command {
-            cli::CacheCommands::Clean => println!("Cleaning cache..."),
-            cli::CacheCommands::Prune => println!("Pruning cache..."),
+            jv::cli::CacheCommands::Clean => println!("Cleaning cache..."),
+            jv::cli::CacheCommands::Prune => println!("Pruning cache..."),
         },
     }
 
