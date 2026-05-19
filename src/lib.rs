@@ -6,6 +6,7 @@ pub mod cache;
 pub mod cli;
 pub mod error;
 pub mod models;
+pub mod parser;
 pub mod repository;
 
 // Re-export the most commonly used types for convenience
