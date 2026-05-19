@@ -1,0 +1,34 @@
+[package]
+name = "jv"
+version = "0.1.0"
+edition = "2021"
+authors = ["Oshadha Gunawardena <oshadha.rocky@gmail.com>"]
+description = "A fast, Rust-based Java dependency resolver inspired by uv"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/nooscraft/jv"
+keywords = ["java", "maven", "gradle", "dependency", "resolver"]
+categories = ["development-tools"]
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "env"] }
+tokio = { version = "1.44", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "gzip"] }
+quick-xml = { version = "0.37", features = ["serialize"] }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+thiserror = "2"
+anyhow = "1.0"
+indicatif = { version = "0.17", features = ["tokio"] }
+url = "2.5"
+sha2 = "0.10"
+hex = "0.4"
+futures = "0.3"
+dirs = "6"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+wiremock = "0.6"
+tokio-test = "0.4"

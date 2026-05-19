@@ -1,0 +1,9 @@
+/target
+
+# Editor and tool specific
+.cursor/
+.crush/
+.idea/
+.vscode/
+*.swp
+*~
