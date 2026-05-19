@@ -29,6 +29,9 @@ pub enum Commands {
 
     /// Manage the local artifact cache.
     Cache(CacheArgs),
+
+    /// Print the dependency tree from a lock file (or by resolving on the fly).
+    Tree(TreeArgs),
 }
 
 #[derive(Args, Debug)]
@@ -49,6 +52,17 @@ pub struct ResolveArgs {
     /// Perform a dry run without writing the lock file.
     #[arg(long)]
     pub dry_run: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct TreeArgs {
+    /// Path to jv.lock (if omitted, will look for one or resolve on the fly).
+    #[arg(value_name = "LOCKFILE", default_value = "jv.lock")]
+    pub lockfile: PathBuf,
+
+    /// Depth to limit the tree (useful for very large Spring Boot apps).
+    #[arg(short, long)]
+    pub depth: Option<usize>,
 }
 
 #[derive(Args, Debug)]

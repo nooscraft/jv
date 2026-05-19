@@ -3,7 +3,7 @@
 use anyhow::Result;
 use clap::Parser;
 use jv::cli::{Cli, Commands};
-use jv::lockfile::{write_lock_file, LockFile};
+use jv::lockfile::{write_lock_file, LockFile, read_lock_file};
 
 use std::path::PathBuf;
 
@@ -98,10 +98,17 @@ async fn main() -> Result<()> {
             jv::cli::CacheCommands::Clean => println!("Cleaning cache..."),
             jv::cli::CacheCommands::Prune => println!("Pruning cache..."),
         },
+
+        Commands::Tree(_args) => {
+            println!("`jv tree` is coming in the next release. For now, the lockfile contains `requested_by` information you can inspect manually.");
+            println!("Run `jv resolve` first, then look at the generated jv.lock.");
+        }
     }
 
     Ok(())
 }
+
+
 
 /// Given a path (file or directory), return the best build file to use.
 fn resolve_build_file(path: &PathBuf) -> Option<PathBuf> {
