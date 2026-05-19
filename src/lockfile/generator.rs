@@ -1,7 +1,7 @@
 //! Lock file (de)serialization.
 
 use crate::error::Result;
-use crate::models::{MavenCoordinate, ResolvedDependency, Scope};
+use crate::models::ResolvedDependency;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;

@@ -6,7 +6,7 @@
 use crate::cache::CacheManager;
 use crate::download::{DownloadResult, ParallelDownloader};
 use crate::error::Result;
-use crate::models::{Artifact, MavenCoordinate, ResolvedDependency, Scope};
+use crate::models::{Artifact, ResolvedDependency, Scope};
 use crate::parser::Pom;
 use crate::repository::RepositoryClient;
 use std::path::Path;

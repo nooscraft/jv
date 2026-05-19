@@ -4,7 +4,7 @@
 //! allowing the overall resolution to feel extremely fast.
 
 use crate::cache::CacheManager;
-use crate::error::Result;
+
 use crate::models::Artifact;
 use crate::repository::RepositoryClient;
 use futures::stream::{self, StreamExt};
@@ -73,7 +73,7 @@ impl ParallelDownloader {
 
         let results: Vec<_> = stream::iter(artifacts.to_vec())
             .enumerate()
-            .map(|(idx, artifact)| {
+            .map(|(_idx, artifact)| {
                 let sem = semaphore.clone();
                 let client = client.clone();
                 let cache = cache.clone();
