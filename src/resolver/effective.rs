@@ -11,7 +11,7 @@
 
 use crate::cache::CacheManager;
 use crate::error::Result;
-use crate::models::{Dependency, MavenCoordinate, Version};
+use crate::models::{Dependency, MavenCoordinate, Scope, Version}; // Scope kept for future import-scope + propagation work
 use crate::parser::Pom;
 use crate::repository::RepositoryClient;
 use std::collections::HashMap;
@@ -89,6 +89,9 @@ impl EffectivePom {
             // dependencyManagement (parent first, child wins on conflict)
             for dm in &pom.dependency_management {
                 let key = (dm.coordinate.group_id.clone(), dm.coordinate.artifact_id.clone());
+                // Note: full support for <scope>import</scope> BOMs is planned.
+                // For now we still record the entry; many common cases are resolved
+                // by the multi-pass interpolation below.
                 dep_mgmt.insert(key, dm.clone());
             }
 
@@ -99,7 +102,7 @@ impl EffectivePom {
         }
 
         // Interpolate properties into the final direct dependencies and depMgmt
-        let interpolated_deps = direct_deps
+        let mut interpolated_deps: Vec<Dependency> = direct_deps
             .into_iter()
             .map(|mut d| {
                 let v = &d.coordinate.version.raw;
@@ -111,12 +114,64 @@ impl EffectivePom {
             })
             .collect();
 
+        // Multi-pass on the direct dependencies too (properties can be defined in terms of other properties)
+        for _ in 0..5 {
+            let mut changed = false;
+            for d in &mut interpolated_deps {
+                let before = d.coordinate.version.raw.clone();
+                let after = interpolate(&properties, &before);
+                if after != before {
+                    if let Ok(ver) = Version::parse(&after) {
+                        d.coordinate.version = ver;
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        // Last-resort: many POMs declare a dependency with a property version but
+        // actually manage the version in their own <dependencyManagement>.
+        // Fill in from dep_mgmt if still unresolved.
+        for d in &mut interpolated_deps {
+            if d.coordinate.version.raw.contains("${") {
+                let key = (
+                    d.coordinate.group_id.clone(),
+                    d.coordinate.artifact_id.clone(),
+                );
+                if let Some(managed) = dep_mgmt.get(&key) {
+                    d.coordinate.version = managed.coordinate.version.clone();
+                }
+            }
+        }
+
         // Also interpolate versions inside dependencyManagement
         for dm in dep_mgmt.values_mut() {
             let raw = &dm.coordinate.version.raw;
             let interpolated = interpolate(&properties, raw);
             if let Ok(ver) = Version::parse(&interpolated) {
                 dm.coordinate.version = ver;
+            }
+        }
+
+        // Final multi-pass interpolation — catches cases where a property in one
+        // POM is defined using another property from a parent (very common).
+        for _ in 0..5 {
+            let mut any_change = false;
+            for dm in dep_mgmt.values_mut() {
+                let before = dm.coordinate.version.raw.clone();
+                let after = interpolate(&properties, &before);
+                if after != before {
+                    if let Ok(ver) = Version::parse(&after) {
+                        dm.coordinate.version = ver;
+                        any_change = true;
+                    }
+                }
+            }
+            if !any_change {
+                break;
             }
         }
 

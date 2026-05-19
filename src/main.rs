@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use jv::cli::{Cli, Commands};
 use jv::lockfile::{write_lock_file, LockFile};
-use jv::resolver::resolve_direct;
+
 use std::path::PathBuf;
 
 #[tokio::main]
