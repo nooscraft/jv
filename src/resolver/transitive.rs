@@ -108,12 +108,17 @@ pub async fn resolve_transitive(
             if let Some(managed_ver) = root_managed.get(&key) {
                 dep.coordinate.version = managed_ver.clone();
             } else {
-                // Try to resolve the version string using root + parent properties
-                let interpolated = crate::resolver::effective::interpolate(&root_properties, &dep.coordinate.version.raw);
-                if interpolated != dep.coordinate.version.raw {
-                    if let Ok(ver) = Version::parse(&interpolated) {
-                        dep.coordinate.version = ver;
+                // Multi-pass interpolation (properties can refer to other properties)
+                let mut version_str = dep.coordinate.version.raw.clone();
+                for _ in 0..5 {
+                    let next = crate::resolver::effective::interpolate(&root_properties, &version_str);
+                    if next == version_str {
+                        break;
                     }
+                    version_str = next;
+                }
+                if let Ok(ver) = Version::parse(&version_str) {
+                    dep.coordinate.version = ver;
                 }
             }
 
@@ -136,6 +141,10 @@ pub async fn resolve_transitive(
 
     let mut visited_poms: HashSet<(String, String, String)> = HashSet::new();
     let mut problems: Vec<String> = Vec::new();  // Collect issues for final report
+
+    // Cache effectiveness tracking (very useful when testing on real projects)
+    let mut pom_cache_hits: usize = 0;
+    let mut pom_cache_misses: usize = 0;
 
     while let Some(work) = to_visit.pop_front() {
         let dep = &work.dep;
@@ -267,6 +276,14 @@ pub async fn resolve_transitive(
     if !problems.is_empty() {
         warn!("Encountered {} problematic POMs during resolution (see above). The lockfile may be incomplete for some transitive branches.", problems.len());
     }
+
+    // Cache effectiveness summary — very useful when testing on large real projects
+    let hits = crate::resolver::effective::POM_CACHE_HITS.load(std::sync::atomic::Ordering::Relaxed);
+    let misses = crate::resolver::effective::POM_CACHE_MISSES.load(std::sync::atomic::Ordering::Relaxed);
+    info!(
+        "Cache summary for this run: {} POM cache hits, {} fetches from network",
+        hits, misses
+    );
 
     Ok(Resolution {
         root: root_pom.coordinate,

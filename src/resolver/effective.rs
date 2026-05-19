@@ -15,7 +15,13 @@ use crate::models::{Dependency, MavenCoordinate, Scope, Version}; // Scope kept 
 use crate::parser::Pom;
 use crate::repository::RepositoryClient;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::debug;
+
+/// Global (for the duration of one `jv resolve` run) POM cache counters.
+/// These are only for visibility during testing on large real projects.
+pub(crate) static POM_CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
+pub(crate) static POM_CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
 
 /// The information we need from a POM (and its parents) to resolve dependencies.
 #[derive(Debug, Clone)]
@@ -26,6 +32,14 @@ pub struct EffectivePom {
     pub dependencies: Vec<Dependency>,
     /// From <dependencyManagement> (including inherited)
     pub dependency_management: HashMap<(String, String), Dependency>,
+}
+
+/// Lightweight result when building an EffectivePom, including cache info.
+#[derive(Debug)]
+pub struct EffectivePomResult {
+    pub pom: EffectivePom,
+    /// Whether the root POM for this coordinate came from the local cache.
+    pub from_cache: bool,
 }
 
 impl EffectivePom {
@@ -48,10 +62,12 @@ impl EffectivePom {
 
             // Try cache first
             let xml = if let Some(xml) = cache.get_pom(&current) {
-                debug!("effective POM: cache hit for parent {}", current);
+                POM_CACHE_HITS.fetch_add(1, Ordering::Relaxed);
+                debug!("effective POM: cache hit for {}", current);
                 xml
             } else {
-                debug!("effective POM: fetching {}", current);
+                POM_CACHE_MISSES.fetch_add(1, Ordering::Relaxed);
+                debug!("effective POM: cache miss, fetching {}", current);
                 let xml = client.fetch_pom(&current).await?;
                 // Opportunistically cache it
                 let _ = cache.put_pom(&current, &xml);
