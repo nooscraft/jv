@@ -6,8 +6,10 @@
 use crate::error::{JvError, Result};
 use crate::models::{Dependency, Exclusion, MavenCoordinate, Scope, Version};
 use quick_xml::de::from_str;
+use serde::de::{self, MapAccess, Visitor};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::fmt;
 use std::str::FromStr;
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -40,10 +42,48 @@ pub struct Parent {
     pub relative_path: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+/// Robust representation of <properties> that never fails the whole POM parse.
+///
+/// Maven <properties> blocks in the wild can contain:
+/// - Simple string values (most common)
+/// - Nested XML elements (rare but seen in some parent POMs)
+/// - Empty elements
+///
+/// We deserialize everything into strings for interpolation purposes.
+#[derive(Debug, Clone, Default)]
 pub struct Properties {
-    #[serde(flatten)]
     pub entries: HashMap<String, String>,
+}
+
+impl<'de> Deserialize<'de> for Properties {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum PropertyValue {
+            Text(String),
+            // Anything else (nested XML, empty element with attributes, etc.)
+            // We treat as empty string for interpolation purposes.
+            Other(serde::de::IgnoredAny),
+        }
+
+        let raw: HashMap<String, PropertyValue> = HashMap::deserialize(deserializer)?;
+
+        let entries = raw
+            .into_iter()
+            .map(|(k, v)| {
+                let value = match v {
+                    PropertyValue::Text(s) => s,
+                    PropertyValue::Other(_) => String::new(),
+                };
+                (k, value)
+            })
+            .collect();
+
+        Ok(Properties { entries })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -262,5 +302,36 @@ mod tests {
         assert_eq!(pom.coordinate.artifact_id, "demo");
         assert_eq!(pom.dependencies.len(), 1);
         assert_eq!(pom.dependencies[0].coordinate.group_id, "org.apache.commons");
+    }
+
+    /// Regression test: some real Apache / Google parent POMs contain
+    /// <properties> blocks that are not pure string maps. The parser must
+    /// never blow up on them.
+    #[tokio::test]
+    async fn parses_real_world_poms_from_maven_central() {
+        let client = crate::repository::RepositoryClient::new();
+
+        let test_coords = [
+            // These were known to trigger the old "map vs string" error
+            ("org.apache.commons", "commons-parent", "64"),
+            ("org.apache.commons", "commons-lang3", "3.14.0"),
+            ("com.google.guava", "guava", "33.2.1-jre"),
+        ];
+
+        for (g, a, v) in test_coords {
+            let coord = MavenCoordinate::new(g, a, Version::parse(v).unwrap());
+            let xml = client
+                .fetch_pom(&coord)
+                .await
+                .unwrap_or_else(|_| panic!("failed to fetch {g}:{a}:{v}"));
+
+            let pom = Pom::parse(&xml);
+            assert!(
+                pom.is_ok(),
+                "should parse real POM {g}:{a}:{v} without crashing on <properties> or parent"
+            );
+            let pom = pom.unwrap();
+            assert_eq!(pom.coordinate.artifact_id, a);
+        }
     }
 }
