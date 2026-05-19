@@ -65,15 +65,39 @@ pub async fn resolve_transitive(
     // Simple progress tracking for large real-world projects (Spring Boot etc.)
     let mut processed = 0usize;
 
-    // Build a managed versions map from the root project's own dependencyManagement.
-    // This is critical for Spring Boot apps where most direct dependencies have no explicit version.
+    // === Build effective managed versions for the ROOT project ===
+    // This is the key improvement for real Spring Boot apps.
+    // We combine:
+    //   1. The root pom's own <dependencyManagement>
+    //   2. Managed versions coming from the root's parent chain (via EffectivePom)
     let mut root_managed: HashMap<(String, String), Version> = HashMap::new();
+
+    // 1. Root's own dependencyManagement
     for dm in &root_pom.dependency_management {
         let key = (dm.coordinate.group_id.clone(), dm.coordinate.artifact_id.clone());
         root_managed.insert(key, dm.coordinate.version.clone());
     }
 
-    // Seed direct dependencies, resolving versions from the root's dependencyManagement when needed.
+    // 2. Also pull from the root's parent chain (this is what Spring Boot parent provides)
+    if let Some(parent) = &root_pom.parent {
+        match EffectivePom::for_coordinate(parent, &client, &cache).await {
+            Ok(parent_effective) => {
+                for (key, dm) in parent_effective.dependency_management {
+                    // Child (root) wins — only insert if not already present
+                    root_managed.entry(key).or_insert(dm.coordinate.version.clone());
+                }
+                // Also bring properties from the parent chain
+                for (k, v) in parent_effective.properties {
+                    // We can merge them into a root-level properties map if needed later
+                }
+            }
+            Err(e) => {
+                debug!("Could not build effective view for root parent {}: {}", parent, e);
+            }
+        }
+    }
+
+    // Seed direct dependencies, resolving versions from the combined managed set.
     let mut seed_deps: Vec<Dependency> = Vec::new();
     for mut dep in root_pom.dependencies.clone() {
         if !dep.scope.is_transitive() {
@@ -85,7 +109,8 @@ pub async fn resolve_transitive(
             if let Some(managed_ver) = root_managed.get(&key) {
                 dep.coordinate.version = managed_ver.clone();
             } else {
-                // Still no version — we can't resolve this one reliably yet.
+                // Still no version after looking at root + parent chain — skip for now
+                debug!("Skipping root direct dep with unresolved version: {}", dep.coordinate);
                 continue;
             }
         }
