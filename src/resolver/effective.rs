@@ -94,12 +94,17 @@ impl EffectivePom {
                     // We fetch the POM and steal its dependencyManagement entries.
                     if let Ok(imported_xml) = client.fetch_pom(&dm.coordinate).await {
                         if let Ok(imported_pom) = Pom::parse(&imported_xml) {
+                            // Merge dependencyManagement
                             for imp_dm in imported_pom.dependency_management {
                                 let imp_key = (
                                     imp_dm.coordinate.group_id.clone(),
                                     imp_dm.coordinate.artifact_id.clone(),
                                 );
                                 dep_mgmt.entry(imp_key).or_insert(imp_dm);
+                            }
+                            // Also bring properties from the BOM (very common in Spring Boot etc.)
+                            for (k, v) in imported_pom.properties {
+                                properties.entry(k).or_insert(v);
                             }
                         }
                     }
