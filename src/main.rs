@@ -21,19 +21,18 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Resolve(args) => {
-            let file = if args.file == PathBuf::from("pom.xml") {
-                // Smart default search
-                if PathBuf::from("pom.xml").exists() {
-                    PathBuf::from("pom.xml")
-                } else if PathBuf::from("build.gradle").exists() {
-                    PathBuf::from("build.gradle")
-                } else {
-                    PathBuf::from("pom.xml")
-                }
-            } else {
-                args.file.clone()
-            };
+            let build_file = resolve_build_file(&args.path);
 
+            if build_file.is_none() {
+                eprintln!(
+                    "Error: Could not find a supported build file in {}",
+                    args.path.display()
+                );
+                eprintln!("Looked for: pom.xml, build.gradle, build.gradle.kts");
+                std::process::exit(1);
+            }
+
+            let file = build_file.unwrap();
             println!("Resolving dependencies from {} ...", file.display());
 
             if file.extension().map_or(false, |e| e == "xml") || file.ends_with("pom.xml") {
@@ -102,4 +101,27 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Given a path (file or directory), return the best build file to use.
+fn resolve_build_file(path: &PathBuf) -> Option<PathBuf> {
+    if path.is_file() {
+        return Some(path.clone());
+    }
+
+    if !path.is_dir() {
+        return None;
+    }
+
+    // Common order: Maven first (most reliable today), then Gradle
+    let candidates = ["pom.xml", "build.gradle", "build.gradle.kts"];
+
+    for name in &candidates {
+        let candidate = path.join(name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
 }

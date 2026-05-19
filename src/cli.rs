@@ -33,10 +33,10 @@ pub enum Commands {
 
 #[derive(Args, Debug)]
 pub struct ResolveArgs {
-    /// Path to pom.xml, build.gradle, or build.gradle.kts.
-    /// If omitted, jv will search the current directory.
-    #[arg(value_name = "FILE", default_value = "pom.xml")]
-    pub file: PathBuf,
+    /// Path to a pom.xml, build.gradle, build.gradle.kts, or a directory containing one.
+    /// If a directory is given, jv will look for pom.xml, then build.gradle, then build.gradle.kts.
+    #[arg(value_name = "PATH", default_value = ".")]
+    pub path: PathBuf,
 
     /// Output path for the generated lock file.
     #[arg(short, long, default_value = "jv.lock")]
