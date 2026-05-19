@@ -25,6 +25,7 @@ pub struct Project {
     #[serde(rename = "dependencyManagement")]
     pub dependency_management: Option<DependencyManagement>,
     pub modules: Option<Modules>,
+    pub profiles: Option<Profiles>,
     pub name: Option<String>,
     pub description: Option<String>,
 }
@@ -132,6 +133,26 @@ pub struct Modules {
     pub entries: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct Profiles {
+    #[serde(rename = "profile", default)]
+    pub entries: Vec<Profile>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Profile {
+    pub id: Option<String>,
+    pub properties: Option<Properties>,
+    pub activation: Option<Activation>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct Activation {
+    #[serde(default)]
+    pub active_by_default: Option<bool>,
+}
+
 /// High-level representation of a parsed POM ready for the resolver.
 #[derive(Debug, Clone)]
 pub struct Pom {
@@ -142,6 +163,7 @@ pub struct Pom {
     pub dependencies: Vec<Dependency>,
     pub dependency_management: Vec<Dependency>,
     pub modules: Vec<String>,
+    pub profiles: Vec<Profile>,
 }
 
 impl Pom {
@@ -212,6 +234,28 @@ impl Pom {
             .map(|m| m.entries)
             .unwrap_or_default();
 
+        let profiles = project
+            .profiles
+            .map(|p| p.entries)
+            .unwrap_or_default();
+
+        // Very basic profile activation for property merging:
+        // - Profiles with <activation><activeByDefault>true</activeByDefault> are active.
+        // - Profiles with no <activation> at all are also treated as active (common pattern).
+        for profile in &profiles {
+            let is_active = profile.activation.as_ref()
+                .map(|act| act.active_by_default == Some(true))
+                .unwrap_or(true);
+
+            if is_active {
+                if let Some(props) = &profile.properties {
+                    for (k, v) in &props.entries {
+                        properties.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+
         Ok(Self {
             coordinate,
             parent,
@@ -220,6 +264,7 @@ impl Pom {
             dependencies,
             dependency_management,
             modules,
+            profiles,
         })
     }
 
