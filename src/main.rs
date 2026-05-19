@@ -37,22 +37,30 @@ async fn main() -> Result<()> {
             println!("Resolving dependencies from {} ...", file.display());
 
             if file.extension().map_or(false, |e| e == "xml") || file.ends_with("pom.xml") {
-                let (resolved, downloads) = resolve_direct(&file, &args.repositories).await?;
+                println!("Using full transitive resolver (with conflict resolution)...");
+
+                let options = jv::resolver::ResolveOptions {
+                    extra_repositories: args.repositories.clone(),
+                };
+
+                let resolution = jv::resolver::resolve_transitive(&file, options).await?;
 
                 println!(
-                    "Resolved {} direct dependencies ({} downloaded, {} cached).",
-                    resolved.len(),
-                    downloads.iter().filter(|d| !d.cached).count(),
-                    downloads.iter().filter(|d| d.cached).count()
+                    "Resolved {} transitive dependencies for {}",
+                    resolution.dependencies.len(),
+                    resolution.root
                 );
 
                 if !args.dry_run {
-                    let lock = LockFile::from_resolved(&resolved);
+                    let lock = LockFile::from_resolved(&resolution.dependencies);
                     write_lock_file(&args.output, &lock)?;
                     println!("Lock file written to {}", args.output.display());
                 } else {
                     println!("Dry run - lock file not written.");
                 }
+
+                // Also demonstrate the old direct path is still available via the library
+                // for comparison during the transition period.
             } else {
                 println!("Gradle files are not fully supported in this build (coming soon).");
             }

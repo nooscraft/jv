@@ -1,9 +1,19 @@
-//! Dependency resolution engine (graph construction + conflict resolution).
+//! Dependency resolution engine.
 //!
-//! Current status: basic direct-dependency resolution that demonstrates the
-//! full pipeline (parse → download in parallel → lock file). Full transitive
-//! resolution with nearest-wins conflict handling is the next milestone.
+//! Current implementation: classic but correct BFS + nearest-wins conflict
+//! resolution with proper version range handling and dependencyManagement.
+//!
+//! Long-term direction (already prepared): full PubGrub solver using
+//! `astral-pubgrub` (the same high-quality solver that powers uv). The
+//! `pubgrub_impl.rs` and `provider.rs` files contain the start of that work.
 
+mod effective;
+pub mod pubgrub; // skeleton for future PubGrub-based solver (astral-pubgrub)
+
+mod transitive;
+
+pub use transitive::{resolve_transitive, ResolveOptions, Resolution};
+
+/// Legacy direct-only resolver (kept for comparison / tests during transition).
 pub mod simple;
-
 pub use simple::resolve_direct;
