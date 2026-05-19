@@ -89,9 +89,22 @@ impl EffectivePom {
             // dependencyManagement (parent first, child wins on conflict)
             for dm in &pom.dependency_management {
                 let key = (dm.coordinate.group_id.clone(), dm.coordinate.artifact_id.clone());
-                // Note: full support for <scope>import</scope> BOMs is planned.
-                // For now we still record the entry; many common cases are resolved
-                // by the multi-pass interpolation below.
+                if dm.scope == Scope::Import {
+                    // Best-effort import of BOM (non-recursive to avoid complexity)
+                    // We fetch the POM and steal its dependencyManagement entries.
+                    if let Ok(imported_xml) = client.fetch_pom(&dm.coordinate).await {
+                        if let Ok(imported_pom) = Pom::parse(&imported_xml) {
+                            for imp_dm in imported_pom.dependency_management {
+                                let imp_key = (
+                                    imp_dm.coordinate.group_id.clone(),
+                                    imp_dm.coordinate.artifact_id.clone(),
+                                );
+                                dep_mgmt.entry(imp_key).or_insert(imp_dm);
+                            }
+                        }
+                    }
+                    continue;
+                }
                 dep_mgmt.insert(key, dm.clone());
             }
 
