@@ -22,6 +22,10 @@ pub struct LockedDependency {
     pub version: String,
     pub scope: String,
     pub optional: bool,
+    /// The GAV of the direct dependency (or root) that caused this artifact to be included.
+    /// Useful for `jv tree` and understanding the dependency graph.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_by: Option<String>,
 }
 
 impl LockFile {
@@ -34,6 +38,7 @@ impl LockFile {
                 version: r.coordinate.version.raw.clone(),
                 scope: r.scope.to_string(),
                 optional: r.optional,
+                requested_by: r.depended_by.as_ref().map(|p| p.to_string()),
             })
             .collect();
 
