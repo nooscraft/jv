@@ -28,6 +28,7 @@ pub(crate) static POM_CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
 #[allow(dead_code)]
 pub struct EffectivePom {
     pub coordinate: MavenCoordinate,
+    pub parent: Option<MavenCoordinate>,
     pub properties: HashMap<String, String>,
     pub dependencies: Vec<Dependency>,
     /// From <dependencyManagement> (including inherited)
@@ -250,8 +251,11 @@ impl EffectivePom {
             }
         }
 
+        let direct_parent = chain.last().and_then(|p| p.parent.clone());
+
         Ok(Self {
             coordinate: coord.clone(),
+            parent: direct_parent,
             properties,
             dependencies: interpolated_deps,
             dependency_management: dep_mgmt,

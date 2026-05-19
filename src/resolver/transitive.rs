@@ -67,12 +67,14 @@ pub async fn resolve_transitive(
     // Simple progress tracking for large real-world projects (Spring Boot etc.)
     let mut processed = 0usize;
 
-    // === Build effective managed versions + properties for the ROOT project ===
-    // This is critical for real Spring Boot apps.
+    // === Build a rich effective context for the ROOT project ===
+    // We walk the full parent chain (root → parent → grandparent → ...) and collect
+    // properties and dependencyManagement with correct precedence (child wins).
+    // This is the "broad" approach to handling real Spring Boot / enterprise parent hierarchies.
     let mut root_managed: HashMap<(String, String), Version> = HashMap::new();
     let mut root_properties: HashMap<String, String> = HashMap::new();
 
-    // 1. Root's own dependencyManagement + properties
+    // Start with the root's own data
     for dm in &root_pom.dependency_management {
         let key = (dm.coordinate.group_id.clone(), dm.coordinate.artifact_id.clone());
         root_managed.insert(key, dm.coordinate.version.clone());
@@ -81,24 +83,63 @@ pub async fn resolve_transitive(
         root_properties.insert(k.clone(), v.clone());
     }
 
-    // 2. Pull from the root's parent chain (Spring Boot parent + its BOMs)
-    if let Some(parent) = &root_pom.parent {
-        match EffectivePom::for_coordinate(parent, &client, &cache, options.no_cache).await {
+    // Walk the entire ancestor chain
+    let mut current_parent = root_pom.parent.clone();
+    let mut visited_parents = std::collections::HashSet::new();
+
+    while let Some(parent_coord) = current_parent {
+        let parent_key = format!("{}:{}", parent_coord.group_id, parent_coord.artifact_id);
+        if !visited_parents.insert(parent_key) {
+            break; // cycle protection
+        }
+
+        match EffectivePom::for_coordinate(&parent_coord, &client, &cache, options.no_cache).await {
             Ok(parent_effective) => {
+                // Merge dependencyManagement (root wins, so we only insert if missing)
                 for (key, dm) in parent_effective.dependency_management {
                     root_managed.entry(key).or_insert(dm.coordinate.version.clone());
                 }
+
+                // Merge properties (root wins)
                 for (k, v) in parent_effective.properties {
                     root_properties.entry(k).or_insert(v);
                 }
+
+                current_parent = parent_effective.parent; // continue walking up
             }
             Err(e) => {
-                debug!("Could not build effective view for root parent {}: {}", parent, e);
+                debug!("Could not build effective view for ancestor {}: {}", parent_coord, e);
+                break;
             }
         }
     }
 
-    // Seed direct dependencies, resolving versions from the combined managed set.
+    // Re-interpolate everything we collected from the ancestor chain (properties can refer to other properties)
+    for _ in 0..5 {
+        let mut changed = false;
+        for (k, v) in root_properties.clone() {
+            let next = crate::resolver::effective::interpolate(&root_properties, &v);
+            if next != v {
+                root_properties.insert(k, next);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    // Also try to resolve any managed versions that were expressed as property placeholders
+    for (key, ver) in root_managed.clone() {
+        if ver.raw.contains("${") {
+            let resolved = crate::resolver::effective::interpolate(&root_properties, &ver.raw);
+            if let Ok(new_ver) = Version::parse(&resolved) {
+                root_managed.insert(key, new_ver);
+            }
+        }
+    }
+
+    // Seed direct dependencies, resolving versions from the rich collected set.
     let mut seed_deps: Vec<Dependency> = Vec::new();
     for mut dep in root_pom.dependencies.clone() {
         if !dep.scope.is_transitive() {
@@ -110,7 +151,7 @@ pub async fn resolve_transitive(
             if let Some(managed_ver) = root_managed.get(&key) {
                 dep.coordinate.version = managed_ver.clone();
             } else {
-                // Multi-pass interpolation (properties can refer to other properties)
+                // Multi-pass interpolation using the full ancestor chain properties
                 let mut version_str = dep.coordinate.version.raw.clone();
                 for _ in 0..5 {
                     let next = crate::resolver::effective::interpolate(&root_properties, &version_str);
@@ -125,7 +166,7 @@ pub async fn resolve_transitive(
             }
 
             if dep.coordinate.version.raw.is_empty() || dep.coordinate.version.raw.contains("${") {
-                debug!("Skipping root direct dep with unresolved version after all attempts: {}", dep.coordinate);
+                debug!("Skipping root direct dep with unresolved version after full ancestor collection: {}", dep.coordinate);
                 continue;
             }
         }
