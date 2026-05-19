@@ -9,7 +9,7 @@
 
 use crate::cache::CacheManager;
 use crate::error::Result;
-use crate::models::{Dependency, MavenCoordinate, ResolvedDependency, Version, VersionRange};
+use crate::models::{Dependency, Exclusion, MavenCoordinate, ResolvedDependency, Version, VersionRange};
 use crate::parser::Pom;
 use crate::repository::RepositoryClient;
 use crate::resolver::effective::EffectivePom;
@@ -48,7 +48,18 @@ pub async fn resolve_transitive(
     // State for resolution
     // Keyed by (group, artifact) → the selected version and the Dependency that won
     let mut selected: HashMap<(String, String), (Version, Dependency)> = HashMap::new();
-    let mut to_visit: VecDeque<Dependency> = VecDeque::new();
+
+    // Work queue item carrying context for correct exclusion propagation and tree tracking.
+    #[derive(Clone)]
+    struct WorkItem {
+        dep: Dependency,
+        parent: MavenCoordinate,
+        // Exclusions accumulated from the path that pulled this dependency in.
+        // This implements proper deep exclusion semantics.
+        accumulated_exclusions: Vec<Exclusion>,
+    }
+
+    let mut to_visit: VecDeque<WorkItem> = VecDeque::new();
 
     // Seed directly from the parsed root POM (we have it on disk).
     // Full effective-POM merging for the root (parent + depMgmt) is done
@@ -60,26 +71,23 @@ pub async fn resolve_transitive(
 
     for dep in seed_deps {
         if dep.scope.is_transitive() {
-            to_visit.push_back(dep);
+            to_visit.push_back(WorkItem {
+                dep,
+                parent: root_pom.coordinate.clone(),
+                accumulated_exclusions: vec![],
+            });
         }
     }
 
     let mut visited_poms: HashSet<(String, String, String)> = HashSet::new();
 
-    while let Some(dep) = to_visit.pop_front() {
+    while let Some(work) = to_visit.pop_front() {
+        let dep = &work.dep;
         let ga = (dep.coordinate.group_id.clone(), dep.coordinate.artifact_id.clone());
 
         // Conflict resolution: nearest wins (first seen wins for the same GA)
         if let Some((existing_version, _)) = selected.get(&ga) {
-            // If the new one is a more specific/compatible version according to the
-            // range the previous declaration accepted, we could upgrade. For strict
-            // Maven nearest-wins we keep the first one unless the new declaration
-            // is a hard requirement that the old one can't satisfy.
             if !range_accepts(&dep.coordinate.version, existing_version) {
-                // The previously selected version is not acceptable to this new
-                // declaration → we have a conflict. For v1 we keep the nearest (first)
-                // and emit a warning. A real implementation would record the
-                // incompatibility for better diagnostics.
                 debug!(
                     "conflict: {} already resolved to {} but {} also requires it",
                     ga.1, existing_version, dep.coordinate.version
@@ -88,7 +96,7 @@ pub async fn resolve_transitive(
             continue;
         }
 
-        // Choose best version for the requested range (if it's a range)
+        // Choose best version for the requested range
         let chosen_version = resolve_best_version(&dep.coordinate, &client, &cache).await?;
 
         let resolved_coord = MavenCoordinate::new(
@@ -97,7 +105,7 @@ pub async fn resolve_transitive(
             chosen_version.clone(),
         );
 
-        // Record the winner
+        // Record the winner (store the original declaration for scope/exclusions info)
         selected.insert(ga.clone(), (chosen_version.clone(), dep.clone()));
 
         // Avoid re-processing the exact same POM
@@ -110,9 +118,7 @@ pub async fn resolve_transitive(
             continue;
         }
 
-        // Fetch the effective POM for the chosen version and enqueue its transitive deps.
-        // If we can't parse a particular transitive POM (rare parser edge case or
-        // very exotic parent), we log and continue — the user still gets a useful lock.
+        // Fetch effective POM
         let effective = match EffectivePom::for_coordinate(&resolved_coord, &client, &cache).await {
             Ok(e) => e,
             Err(e) => {
@@ -137,15 +143,27 @@ pub async fn resolve_transitive(
                 }
             }
 
-            // Apply exclusions from the parent declaration
-            let excluded = dep.exclusions.iter().any(|ex| {
+            // Check accumulated exclusions from the entire ancestor chain
+            let excluded = work.accumulated_exclusions.iter().any(|ex| {
+                ex.matches(&child.coordinate.group_id, &child.coordinate.artifact_id)
+            }) || dep.exclusions.iter().any(|ex| {
                 ex.matches(&child.coordinate.group_id, &child.coordinate.artifact_id)
             });
+
             if excluded {
+                debug!("excluded {} by exclusion from {}", child.coordinate, dep.coordinate);
                 continue;
             }
 
-            to_visit.push_back(child);
+            // Build new accumulated exclusions for the child (append this level's exclusions)
+            let mut child_exclusions = work.accumulated_exclusions.clone();
+            child_exclusions.extend(dep.exclusions.iter().cloned());
+
+            to_visit.push_back(WorkItem {
+                dep: child,
+                parent: resolved_coord.clone(),
+                accumulated_exclusions: child_exclusions,
+            });
         }
     }
 
@@ -163,8 +181,11 @@ pub async fn resolve_transitive(
             coordinate: coord,
             scope: original_dep.scope,
             optional: original_dep.optional,
+            // For now we still point to root. Accurate per-node depended_by
+            // will be added in the next increment when we keep parent info
+            // in the selected map.
             depended_by: Some(root_pom.coordinate.clone()),
-            artifacts: vec![], // filled later by download phase
+            artifacts: vec![],
         });
     }
 
