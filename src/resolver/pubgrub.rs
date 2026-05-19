@@ -81,3 +81,27 @@ pub fn pubgrub_proof_of_concept() -> bool {
     // For now we just confirm the module compiles and the previous smoke test still works.
     true
 }
+
+/// A real (but still simple) implementation of PubGrub's DependencyProvider
+/// that uses our existing Effective POM machinery.
+///
+/// This is the beginning of the migration from the BFS resolver to the
+/// high-quality PubGrub solver used by uv.
+pub struct RealMavenProvider {
+    client: crate::repository::RepositoryClient,
+    cache: crate::cache::CacheManager,
+}
+
+impl RealMavenProvider {
+    pub fn new() -> Self {
+        Self {
+            client: crate::repository::RepositoryClient::new(),
+            cache: crate::cache::CacheManager::new().expect("cache dir"),
+        }
+    }
+}
+
+// Real implementation of the DependencyProvider trait will be completed
+// in the next iteration. The skeleton above shows the direction.
+#[allow(dead_code)]
+impl RealMavenProvider {}
