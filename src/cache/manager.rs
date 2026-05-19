@@ -56,6 +56,9 @@ impl CacheManager {
             reason: e.to_string(),
         })?;
 
+        // Pre-create the repos/ directory so namespaced caches have a home
+        let _ = fs::create_dir_all(root.join("repos"));
+
         Ok(Self {
             root,
             repo_namespace: namespace,
@@ -98,6 +101,30 @@ impl CacheManager {
     /// Returns the namespace of this cache instance, if any.
     pub fn namespace(&self) -> Option<&str> {
         self.repo_namespace.as_deref()
+    }
+
+    /// Returns basic stats about the cache (best effort).
+    pub fn stats(&self) -> (usize, u64) {
+        // Very rough implementation: count files and sum sizes under effective root
+        let mut file_count = 0usize;
+        let mut total_size: u64 = 0;
+
+        fn walk_and_sum(dir: &Path, count: &mut usize, size: &mut u64) {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        walk_and_sum(&path, count, size);
+                    } else if let Ok(meta) = entry.metadata() {
+                        *count += 1;
+                        *size += meta.len();
+                    }
+                }
+            }
+        }
+
+        walk_and_sum(&self.effective_root(), &mut file_count, &mut total_size);
+        (file_count, total_size)
     }
 
     /// Create a new CacheManager for a specific repository URL.
