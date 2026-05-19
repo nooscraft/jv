@@ -51,6 +51,16 @@ impl EffectivePom {
         cache: &CacheManager,
         no_cache: bool,
     ) -> Result<Self> {
+        Self::for_coordinate_impl(coord, client, cache, no_cache, 0).await
+    }
+
+    async fn for_coordinate_impl(
+        coord: &MavenCoordinate,
+        client: &RepositoryClient,
+        cache: &CacheManager,
+        no_cache: bool,
+        depth: usize,
+    ) -> Result<Self> {
         let mut current = coord.clone();
         let mut chain: Vec<Pom> = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -112,20 +122,20 @@ impl EffectivePom {
             for dm in &pom.dependency_management {
                 let key = (dm.coordinate.group_id.clone(), dm.coordinate.artifact_id.clone());
                 if dm.scope == Scope::Import {
-                    let bom_group = &dm.coordinate.group_id;
-                    let bom_artifact = &dm.coordinate.artifact_id;
-                    let bom_version = &dm.coordinate.version;
+                    let bom_coord = &dm.coordinate;
 
-                    // Fast path: use previously cached effective data from this BOM
-                    if let Some(cached) = cache.get_bom_effective(bom_group, bom_artifact, bom_version) {
+                    // Fast path: cached effective data for this BOM
+                    if let Some(cached) = cache.get_bom_effective(
+                        &bom_coord.group_id,
+                        &bom_coord.artifact_id,
+                        &bom_coord.version,
+                    ) {
                         for (imp_key_str, ver_str) in cached.managed_versions {
-                            // Reconstruct a minimal Dependency for dep_mgmt
                             if let Some((g, a)) = imp_key_str.split_once(':') {
                                 if let Ok(ver) = Version::parse(&ver_str) {
                                     let mut managed_dep = Dependency::new(g, a, "");
                                     managed_dep.coordinate.version = ver;
-                                    let imp_key = (g.to_string(), a.to_string());
-                                    dep_mgmt.insert(imp_key, managed_dep);
+                                    dep_mgmt.insert((g.to_string(), a.to_string()), managed_dep);
                                 }
                             }
                         }
@@ -135,35 +145,59 @@ impl EffectivePom {
                         continue;
                     }
 
-                    // Slow path: fetch and parse the BOM
-                    if let Ok(imported_xml) = client.fetch_pom(&dm.coordinate).await {
-                        if let Ok(imported_pom) = Pom::parse(&imported_xml) {
-                            // First, collect data we want to cache
-                            let mut managed_versions = HashMap::new();
-                            for imp_dm in &imported_pom.dependency_management {
-                                let k = format!("{}:{}", imp_dm.coordinate.group_id, imp_dm.coordinate.artifact_id);
-                                managed_versions.insert(k, imp_dm.coordinate.version.raw.clone());
-                            }
-                            let bom_properties = imported_pom.properties.clone();
+                    // Stronger path: Build a full EffectivePom for the imported BOM.
+                    // We limit recursion depth on imports to avoid deep or cyclic BOM graphs.
+                    const MAX_IMPORT_DEPTH: usize = 4;
+                    if depth >= MAX_IMPORT_DEPTH {
+                        debug!("Import depth limit reached for BOM {}", bom_coord);
+                        continue;
+                    }
 
-                            // Merge into current effective view
-                            for imp_dm in imported_pom.dependency_management {
-                                let imp_key = (
-                                    imp_dm.coordinate.group_id.clone(),
-                                    imp_dm.coordinate.artifact_id.clone(),
-                                );
-                                dep_mgmt.entry(imp_key).or_insert(imp_dm);
+                    match Box::pin(Self::for_coordinate_impl(bom_coord, client, cache, no_cache, depth + 1)).await {
+                        Ok(imported_effective) => {
+                            // Merge everything we got from the effective view of the BOM
+                            for (imp_key, imp_dm) in &imported_effective.dependency_management {
+                                dep_mgmt.entry(imp_key.clone()).or_insert(imp_dm.clone());
                             }
-                            for (k, v) in bom_properties.iter() {
+                            for (k, v) in &imported_effective.properties {
                                 properties.entry(k.clone()).or_insert(v.clone());
                             }
 
-                            // Persist for future runs
+                            // Persist a useful cache entry for next time
+                            let mut managed_versions = HashMap::new();
+                            for (imp_key, imp_dm) in &imported_effective.dependency_management {
+                                let k = format!("{}:{}", imp_key.0, imp_key.1);
+                                managed_versions.insert(k, imp_dm.coordinate.version.raw.clone());
+                            }
+
                             let bom_data = crate::cache::CachedBomData {
                                 managed_versions,
-                                properties: bom_properties,
+                                properties: imported_effective.properties.clone(),
                             };
-                            let _ = cache.put_bom_effective(bom_group, bom_artifact, bom_version, &bom_data);
+                            let _ = cache.put_bom_effective(
+                                &bom_coord.group_id,
+                                &bom_coord.artifact_id,
+                                &bom_coord.version,
+                                &bom_data,
+                            );
+                        }
+                        Err(e) => {
+                            debug!("Failed to build effective view for imported BOM {}: {}", bom_coord, e);
+                            // Fallback to direct fetch (best effort)
+                            if let Ok(imported_xml) = client.fetch_pom(bom_coord).await {
+                                if let Ok(imported_pom) = Pom::parse(&imported_xml) {
+                                    for imp_dm in imported_pom.dependency_management {
+                                        let imp_key = (
+                                            imp_dm.coordinate.group_id.clone(),
+                                            imp_dm.coordinate.artifact_id.clone(),
+                                        );
+                                        dep_mgmt.entry(imp_key).or_insert(imp_dm);
+                                    }
+                                    for (k, v) in imported_pom.properties {
+                                        properties.entry(k).or_insert(v);
+                                    }
+                                }
+                            }
                         }
                     }
                     continue;
