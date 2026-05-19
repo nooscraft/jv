@@ -54,9 +54,30 @@ The script automatically captures:
 
 ## Current Status
 
-Structured benchmarking framework is now in place (`scripts/benchmark.sh`).
+Structured benchmarking framework is now in place (`scripts/benchmark.sh` + `results/` directory).
 
-Initial test runs have been performed on `micro-server-own`. Full comparative numbers (jv vs Maven) will be added as we continue improving resolution quality on real projects.
+### First Structured Run (2026-05-19)
+
+**Project**: `micro-server-own` (multi-module Spring Boot 1.5 project)
+
+**Environment**:
+- OS: macOS arm64 (Darwin)
+- Java: 21.0.2
+- Maven: Not available in PATH
+- jv: commit `b801336` (release build)
+
+**Mode**: `warm`
+
+**Result**:
+- jv resolved **3 artifacts** (processed 5 POMs)
+- Time: **0.56 seconds**
+- Many dependencies still unresolved due to `${...}` property placeholders (Lombok, internal modules, Thymeleaf extras, etc.)
+
+**Notes**:
+- This run highlights current limitations in property resolution on older Spring Boot setups.
+- As resolver quality improves (especially BOM + property handling), we expect both the number of resolved artifacts and the value of these benchmarks to increase significantly.
+
+Full raw output is saved in `results/micro-server-own_20260519_152335.txt`.
 
 ## Example Output
 

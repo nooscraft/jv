@@ -1,0 +1,15 @@
+Project: /tmp/micro-server-own
+Date: 2026-05-19 15:23:25
+Mode: warm
+OS: Darwin / arm64
+Java: 21.0.2
+Maven: Not found
+jv (git): b801336
+
+--- jv Result ---
+Transitive resolution complete: 3 artifacts (processed 5 POMs)
+jv resolve completed in 0.560s
+
+Notes:
+- Maven not available in this environment
+- Resolution limited due to unresolved ${...} properties (Lombok, internal modules, etc.)
