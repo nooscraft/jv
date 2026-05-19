@@ -6,10 +6,8 @@
 use crate::error::{JvError, Result};
 use crate::models::{Dependency, Exclusion, MavenCoordinate, Scope, Version};
 use quick_xml::de::from_str;
-use serde::de::{self, MapAccess, Visitor};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::fmt;
 use std::str::FromStr;
 
 #[derive(Debug, Clone, Deserialize, Default)]

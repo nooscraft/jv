@@ -7,6 +7,7 @@
 //! `astral-pubgrub` (the same high-quality solver that powers uv). The
 //! `pubgrub_impl.rs` and `provider.rs` files contain the start of that work.
 
+#[allow(dead_code)]
 mod effective;
 pub mod pubgrub; // skeleton for future PubGrub-based solver (astral-pubgrub)
 

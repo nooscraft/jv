@@ -9,7 +9,7 @@
 
 use crate::cache::CacheManager;
 use crate::error::Result;
-use crate::models::{Dependency, MavenCoordinate, ResolvedDependency, Scope, Version, VersionRange};
+use crate::models::{Dependency, MavenCoordinate, ResolvedDependency, Version, VersionRange};
 use crate::parser::Pom;
 use crate::repository::RepositoryClient;
 use crate::resolver::effective::EffectivePom;
@@ -193,8 +193,8 @@ fn range_accepts(declared: &Version, selected: &Version) -> bool {
 /// we can actually download, preferring the highest compatible version.
 async fn resolve_best_version(
     dep: &MavenCoordinate,
-    client: &RepositoryClient,
-    cache: &CacheManager,
+    _client: &RepositoryClient,
+    _cache: &CacheManager,
 ) -> Result<Version> {
     if dep.version.raw != "managed" {
         // Try to treat it as a concrete version or a range we can satisfy

@@ -10,15 +10,16 @@
 //! - Scope normalization
 
 use crate::cache::CacheManager;
-use crate::error::{JvError, Result};
-use crate::models::{Dependency, MavenCoordinate, Scope, Version};
+use crate::error::Result;
+use crate::models::{Dependency, MavenCoordinate, Version};
 use crate::parser::Pom;
 use crate::repository::RepositoryClient;
 use std::collections::HashMap;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// The information we need from a POM (and its parents) to resolve dependencies.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct EffectivePom {
     pub coordinate: MavenCoordinate,
     pub properties: HashMap<String, String>,
@@ -59,7 +60,6 @@ impl EffectivePom {
 
             let pom = Pom::parse(&xml)?;
 
-            let has_parent = pom.parent.is_some();
             chain.push(pom);
 
             if let Some(parent) = &chain.last().unwrap().parent {
