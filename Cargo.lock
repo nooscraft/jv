@@ -922,6 +922,7 @@ dependencies = [
  "indicatif",
  "insta",
  "quick-xml",
+ "regex",
  "reqwest",
  "serde",
  "sha2",

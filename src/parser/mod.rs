@@ -4,6 +4,7 @@
 //! majority of Java projects ultimately express their dependency graph via POMs
 //! (even Gradle projects often publish effective POMs).
 
+pub mod gradle;
 pub mod pom;
 
 pub use pom::Pom;
