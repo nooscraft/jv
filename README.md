@@ -1,219 +1,98 @@
 # jv
 
-A fast, Rust-based Java dependency resolver inspired by [uv](https://github.com/astral-sh/uv). Resolve Maven and Gradle dependencies with 10–100x speedups over traditional tools.
+A fast, Rust-based dependency resolver for Java and the JVM ecosystem.
 
-## Overview
+**jv** is an attempt to bring the speed, caching model, and developer experience of tools like [uv](https://github.com/astral-sh/uv) to the Java world, while remaining compatible with existing Maven and Gradle projects.
 
-`jv` is a standalone dependency resolver for Java projects that provides:
-- **Fast dependency resolution** using Rust's performance advantages
-- **Parallel artifact downloads** with smart caching
-- **Deterministic lock files** in TOML format (similar to `Cargo.lock`)
-- **Maven and Gradle support** for parsing build files
-- **Conflict resolution** using industry-standard algorithms
+> **Status**: Active development. Core resolution, caching, and lockfile generation are working and being hardened on real-world projects.
+
+## Highlights
+
+- **Fast dependency resolution** for Maven and Gradle projects, written in Rust
+- **Global, content-addressable cache** — share dependencies across all your Java projects
+- **Parallel artifact downloading** with progress reporting
+- **Deterministic TOML lockfiles** (`jv.lock`)
+- Works with **existing projects** — point it at any `pom.xml` or `build.gradle`
+- Transitive dependency resolution with conflict handling
+- Support for Maven Central and custom repositories
 
 ## Motivation
 
-Maven and Gradle can be painfully slow on large projects with complex dependency graphs. Build times remain a common pain point for Java developers. `jv` applies the same performance principles that made `uv` revolutionary for Python to the Java ecosystem.
+Maven and Gradle are powerful, but their dependency resolution can be painfully slow on large or complex projects. `jv` applies the lessons from high-performance tools like uv and Cargo to make the resolution step dramatically faster while remaining compatible with the existing Java ecosystem.
 
-## Features
+## Current Capabilities
 
-### Phase 1 (Current Focus)
+jv can already be used on real projects:
 
-- [ ] Parse Maven POM files with inheritance and multi-module support
-- [ ] Parse Gradle build files (Groovy DSL, basic support)
-- [ ] Resolve transitive dependencies with conflict resolution
-- [ ] Support Maven repositories (Maven Central and custom repos)
-- [ ] Parallel artifact downloading with connection pooling
-- [ ] Smart local caching (content-addressable storage)
-- [ ] Generate deterministic TOML lock files
-- [ ] CLI interface with progress reporting
+- Resolve dependencies from `pom.xml` (including parent inheritance and basic BOM support)
+- Basic support for declarative Gradle `dependencies {}` blocks
+- Transitive resolution with nearest-wins conflict handling
+- Parallel downloads + aggressive local caching
+- Generate `jv.lock` (TOML) lockfiles
 
-### Future Phases
-
-- Phase 2: Gradle/Maven plugin integration
-- Phase 3: Full build system capabilities
-
-## Architecture
-
-```mermaid
-flowchart TD
-    CLI[CLI Tool] --> Parser[Build File Parser]
-    Parser --> |POM/Gradle| DepGraph[Dependency Graph Builder]
-    DepGraph --> Resolver[Conflict Resolver]
-    Resolver --> RepoClient[Repository Client]
-    RepoClient --> |Parallel| Downloader[Artifact Downloader]
-    Downloader --> Cache[Cache Manager]
-    Resolver --> LockGen[Lock File Generator]
-    LockGen --> |TOML| LockFile[Lock File]
-```
+Performance work and deeper compatibility (especially with complex Spring Boot / multi-module projects) is ongoing.
 
 ## Installation
 
-*Coming soon - installation instructions will be available once Phase 1 is complete.*
-
-## Usage
-
-### Resolve Dependencies
-
-Generate a lock file from your project's build file:
+jv is currently built from source:
 
 ```bash
-# For Maven projects
+git clone https://github.com/nooscraft/jv
+cd jv
+cargo install --path .
+```
+
+Standalone installers and pre-built binaries are planned.
+
+## Quick Start
+
+Resolve dependencies for a project:
+
+```bash
+# From inside a project directory
+jv resolve .
+
+# Or point directly at a file
 jv resolve pom.xml
-
-# For Gradle projects
 jv resolve build.gradle
-
-# Output: jv.lock
 ```
 
-### Verify Lock File
-
-Check if your lock file matches the current dependencies:
+Generate (or update) a lockfile:
 
 ```bash
-jv verify
+jv resolve .
 ```
 
-### Update Dependencies
-
-Update a specific dependency:
+View dependency tree (coming soon):
 
 ```bash
-jv update com.example:artifact:1.0.0
+jv tree
 ```
 
-## Project Structure
+## Documentation
 
-```
-jv/
-├── Cargo.toml                 # Project configuration
-├── README.md                  # This file
-├── src/
-│   ├── main.rs               # CLI entry point
-│   ├── cli.rs                # Command-line argument parsing
-│   ├── parser/
-│   │   ├── mod.rs
-│   │   ├── pom.rs           # Maven POM parser
-│   │   └── gradle.rs        # Gradle build file parser
-│   ├── resolver/
-│   │   ├── mod.rs
-│   │   ├── graph.rs         # Dependency graph construction
-│   │   └── conflicts.rs     # Conflict resolution algorithms
-│   ├── repository/
-│   │   ├── mod.rs
-│   │   ├── client.rs        # Maven repository HTTP client
-│   │   └── metadata.rs      # POM/metadata parsing
-│   ├── cache/
-│   │   ├── mod.rs
-│   │   └── manager.rs       # Local artifact cache
-│   ├── download/
-│   │   ├── mod.rs
-│   │   └── parallel.rs      # Parallel artifact downloading
-│   ├── lockfile/
-│   │   ├── mod.rs
-│   │   └── generator.rs     # TOML lock file generation
-│   └── models.rs             # Core data structures
-└── tests/
-    └── integration/
-```
+Detailed documentation is still being written. For now, use `jv --help` or `jv resolve --help`.
 
-## Technical Details
+## Development Status
 
-### Lock File Format
+jv is under active development. The focus right now is:
 
-Lock files are stored as `jv.lock` in the project root (similar to `Cargo.lock`), using TOML format with resolved dependency trees and exact versions.
+- Making resolution robust on large, real-world Spring Boot and enterprise Java projects
+- Improving cache effectiveness and performance
+- Adding better tooling around lockfiles (`jv tree`, verification, etc.)
 
-### Cache Location
-
-Artifacts and metadata are cached in `~/.cache/jv/` following the XDG Base Directory Specification.
-
-### Conflict Resolution
-
-`jv` uses Maven's default "nearest-wins" strategy for conflict resolution, with support for:
-- Version ranges (e.g., `[1.0,2.0)`, `1.+`)
-- Dependency exclusions
-- Optional dependencies
-
-## Development
-
-### Prerequisites
-
-- Rust 1.70+ (or latest stable)
-- Cargo
-
-### Key Dependencies
-
-- `clap` - CLI argument parsing
-- `reqwest` (with `tokio`) - HTTP client for repository access
-- `quick-xml` - XML parsing for POMs
-- `toml` - TOML serialization for lock files
-- `serde` - Serialization framework
-- `petgraph` - Graph data structures
-- `semver` - Version comparison and ranges
-- `anyhow` / `thiserror` - Error handling
-
-### Building
-
-```bash
-cargo build --release
-```
-
-### Running Tests
-
-```bash
-cargo test
-```
-
-## Status
-
-✅ **Phase 1 Core Pipeline Working**
-
-As of the latest commits, `jv` can already deliver on the key promises:
-
-- Parse real `pom.xml` files
-- Resolve (direct) dependencies against Maven Central + custom repos
-- **Parallel artifact downloading** with progress bars (tokio + semaphore + indicatif)
-- **Global content cache** under `~/.cache/jv` so common deps are shared across projects
-- Generate deterministic `jv.lock` TOML lock files
-
-Example:
-```bash
-jv resolve /path/to/pom.xml
-# → downloads in parallel, writes jv.lock, reuses cache on next run
-```
-
-Full transitive dependency collection, conflict resolution (nearest-wins), Gradle support, and parent POM inheritance are the remaining high-priority items for Phase 1 completion.
-
-See git history for the incremental development (7+ meaningful commits pushed to `main`).
-
-## Success Criteria
-
-- [x] Parse simple Maven POMs and resolve transitive dependencies
-- [ ] Parse simple Gradle build files and resolve dependencies
-- [ ] Generate deterministic lock files in TOML format
-- [ ] Resolve dependencies significantly faster than Maven/Gradle for large projects
-- [ ] Handle common conflict resolution scenarios correctly
-- [ ] Provide clear error messages for unresolvable dependencies
+See the [GitHub Issues](https://github.com/nooscraft/jv/issues) for the current roadmap.
 
 ## Contributing
 
-Contributions are welcome! This project is in early stages, and we'd love help with:
-- Implementing core features
-- Testing with real-world projects
-- Documentation improvements
-- Performance optimization
+We welcome contributions, bug reports, and real-world usage feedback.
 
-## License
-
-*License to be determined*
+If you're testing jv on a large or complex Java project, please open an issue — real project feedback is extremely valuable.
 
 ## Acknowledgments
 
-Inspired by [uv](https://github.com/astral-sh/uv) and the Rust ecosystem's approach to high-performance tooling.
+jv is heavily inspired by [uv](https://github.com/astral-sh/uv) and the Rust tooling ecosystem.
 
-## Related Projects
+## License
 
-- [Coursier](https://github.com/coursier/coursier) - Fast Scala/Java dependency resolver (Scala-based)
-- [Maven](https://maven.apache.org/) - Java build and dependency management
-- [Gradle](https://gradle.org/) - Modern build automation tool
+To be decided (likely Apache-2.0 / MIT dual license).
