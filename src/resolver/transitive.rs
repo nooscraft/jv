@@ -65,22 +65,40 @@ pub async fn resolve_transitive(
     // Simple progress tracking for large real-world projects (Spring Boot etc.)
     let mut processed = 0usize;
 
-    // Seed directly from the parsed root POM (we have it on disk).
-    // Full effective-POM merging for the root (parent + depMgmt) is done
-    // when we process each transitive child.
-    let mut seed_deps = root_pom.dependencies.clone();
-    // Very crude: if any dep has no version, we can't resolve it yet.
-    // In a real project this would come from a <dependencyManagement> in the root.
-    seed_deps.retain(|d| !d.coordinate.version.raw.is_empty() && d.coordinate.version.raw != "managed");
+    // Build a managed versions map from the root project's own dependencyManagement.
+    // This is critical for Spring Boot apps where most direct dependencies have no explicit version.
+    let mut root_managed: HashMap<(String, String), Version> = HashMap::new();
+    for dm in &root_pom.dependency_management {
+        let key = (dm.coordinate.group_id.clone(), dm.coordinate.artifact_id.clone());
+        root_managed.insert(key, dm.coordinate.version.clone());
+    }
+
+    // Seed direct dependencies, resolving versions from the root's dependencyManagement when needed.
+    let mut seed_deps: Vec<Dependency> = Vec::new();
+    for mut dep in root_pom.dependencies.clone() {
+        if !dep.scope.is_transitive() {
+            continue;
+        }
+
+        if dep.coordinate.version.raw.is_empty() || dep.coordinate.version.raw == "managed" {
+            let key = (dep.coordinate.group_id.clone(), dep.coordinate.artifact_id.clone());
+            if let Some(managed_ver) = root_managed.get(&key) {
+                dep.coordinate.version = managed_ver.clone();
+            } else {
+                // Still no version — we can't resolve this one reliably yet.
+                continue;
+            }
+        }
+
+        seed_deps.push(dep);
+    }
 
     for dep in seed_deps {
-        if dep.scope.is_transitive() {
-            to_visit.push_back(WorkItem {
-                dep,
-                parent: root_pom.coordinate.clone(), // direct deps are pulled by the root project itself
-                accumulated_exclusions: vec![],
-            });
-        }
+        to_visit.push_back(WorkItem {
+            dep,
+            parent: root_pom.coordinate.clone(),
+            accumulated_exclusions: vec![],
+        });
     }
 
     let mut visited_poms: HashSet<(String, String, String)> = HashSet::new();
