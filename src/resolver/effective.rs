@@ -130,17 +130,23 @@ impl EffectivePom {
                         &bom_coord.artifact_id,
                         &bom_coord.version,
                     ) {
+                        // Merge properties *first* — they may be needed to resolve version placeholders
+                        // stored in the cached managed_versions.
+                        for (k, v) in cached.properties {
+                            properties.entry(k).or_insert(v);
+                        }
+
                         for (imp_key_str, ver_str) in cached.managed_versions {
                             if let Some((g, a)) = imp_key_str.split_once(':') {
-                                if let Ok(ver) = Version::parse(&ver_str) {
+                                // Resolve any remaining ${} using the properties we now have (including
+                                // those from this BOM and its parents).
+                                let resolved = crate::resolver::effective::interpolate(&properties, &ver_str);
+                                if let Ok(ver) = Version::parse(&resolved) {
                                     let mut managed_dep = Dependency::new(g, a, "");
                                     managed_dep.coordinate.version = ver;
                                     dep_mgmt.insert((g.to_string(), a.to_string()), managed_dep);
                                 }
                             }
-                        }
-                        for (k, v) in cached.properties {
-                            properties.entry(k).or_insert(v);
                         }
                         continue;
                     }
