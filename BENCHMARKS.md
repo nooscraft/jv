@@ -8,35 +8,74 @@ This document contains performance measurements comparing `jv` against tradition
 
 - Measure end-to-end dependency resolution time
 - Measure behavior with cold cache vs warm/global cache
-- Compare against `mvn dependency:resolve` / `mvn dependency:go-offline`
-- Compare against equivalent Gradle commands
+- Compare against Maven and Gradle using fair, reproducible commands
 - Provide transparent methodology and raw data
 
 ## Test Projects
 
-We are currently running benchmarks against:
+Current projects under test:
 
-- [micro-server-own](https://github.com/Blucezhang/micro-server-own) — A multi-module Spring Boot / Spring Cloud project
-- Additional real-world Spring Boot and enterprise Java projects (to be added)
+- [micro-server-own](https://github.com/Blucezhang/micro-server-own) — Multi-module Spring Boot / Spring Cloud project (primary test case)
+- Additional real-world Spring Boot and enterprise Java projects (planned)
+
+## Benchmark Script
+
+We use a structured benchmark runner located at:
+
+```bash
+./scripts/benchmark.sh <project-path> [mode]
+```
+
+Supported modes:
+- `warm` (default) — Use existing caches
+- `cold` — Clear relevant caches before running
+- `no-cache` — Run jv with `--no-cache`
+
+Example:
+```bash
+./scripts/benchmark.sh /path/to/project warm
+```
+
+The script automatically captures:
+- Date and time
+- Operating system and architecture
+- Java version
+- Maven version (if available)
+- jv git commit
+- Wall-clock timing for each tool
 
 ## Methodology
 
-- All tests run on the same machine
-- `jv` is tested using the release binary (`target/release/jv`)
-- Maven and Gradle are tested with their standard dependency resolution commands
-- Both cold cache and warm cache scenarios are measured where applicable
-- Multiple runs are averaged to reduce noise
+- All measurements are run on the same machine
+- `jv` is tested using the release binary when available (`target/release/jv`)
+- Maven comparison uses `mvn dependency:go-offline -B -q`
+- Both cold-cache and warm-cache scenarios are supported
+- Results are intended to be copied into this file or `results/`
 
 ## Current Status
 
-Benchmarks are actively being collected. Early internal results on real Spring Boot projects have been promising, particularly on repeated runs thanks to jv's global cache.
+Structured benchmarking framework is now in place (`scripts/benchmark.sh`).
 
-Detailed numbers and comparisons will be published here once we have a sufficient set of reproducible measurements.
+Initial test runs have been performed on `micro-server-own`. Full comparative numbers (jv vs Maven) will be added as we continue improving resolution quality on real projects.
 
-## Contributing Benchmarks
+## Example Output
 
-If you have a large or interesting Java project and would like to contribute benchmark data, please open an issue.
+```
+▶ Environment
+Date:             2026-05-19 15:22:06
+OS / Arch:        Darwin / arm64
+Java:             21.0.2
+Maven:            Maven not found
+jv (git):         4ebec50
+
+▶ Running jv benchmark
+[INFO] jv resolve completed in 0.97s
+```
+
+## Contributing
+
+If you would like to contribute benchmark data from your own projects, please open an issue with the output from the benchmark script.
 
 ## License
 
-This document is part of the jv project and is licensed under the same terms as the project.
+This document is part of the jv project and follows the same license.
