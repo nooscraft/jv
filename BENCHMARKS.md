@@ -61,7 +61,8 @@ Structured benchmarking framework is now in place (`scripts/benchmark.sh` + `res
 | Date       | Project            | Mode  | jv Time | Artifacts Resolved | Notes                                      | Result File                              |
 |------------|--------------------|-------|---------|--------------------|--------------------------------------------|------------------------------------------|
 | 2026-05-19 | micro-server-own   | warm  | 0.56s   | 3                  | Warm cache run                             | `micro-server-own_20260519_152335.txt`   |
-| 2026-05-19 | micro-server-own   | cold  | 0.65s   | 3                  | Cold cache (jv cache cleared before run)   | `micro-server-own_20260519_152725.txt`   |
+| 2026-05-19 | micro-server-own   | cold      | 0.65s    | 3                  | Cold cache (jv cache cleared before run)          | `micro-server-own_20260519_152725.txt`   |
+| 2026-05-19 | micro-server-own   | no-cache  | 79.3s    | 49                 | Full no-cache run with improved resolver          | `micro-server-own_20260519_153032.txt`   |
 
 **Environment (both runs)**:
 - OS / Arch: macOS arm64 (Darwin)
@@ -71,10 +72,11 @@ Structured benchmarking framework is now in place (`scripts/benchmark.sh` + `res
 
 **Key Observations**:
 - Cold cache run was ~16% slower than warm cache (expected).
-- Resolution is currently very limited (only 3 artifacts) due to many unresolved `${...}` version placeholders in the project (common in older Spring Boot 1.5 setups).
-- No Maven comparison was possible in this environment.
+- The `no-cache` run took significantly longer (79s) but resolved **49 artifacts** thanks to recent resolver improvements (deeper BOM + ancestor property handling).
+- Resolution quality has improved noticeably between runs.
+- Homebrew is available in the environment; `brew install maven` was started to enable direct jv vs Maven comparisons (installation can take time on first run).
 
-As we improve the resolver's ability to handle complex property and BOM resolution, we expect the number of resolved artifacts to increase significantly, making future comparisons more meaningful.
+As resolver improvements continue, we expect both speed and completeness to improve further on this and similar projects.
 
 ## Example Output
 
