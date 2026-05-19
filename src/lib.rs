@@ -2,8 +2,10 @@
 //!
 //! The library provides the core resolution engine that the CLI consumes.
 
-pub mod models;
 pub mod cli;
+pub mod error;
+pub mod models;
+pub mod repository;
 
 // Re-export the most commonly used types for convenience
 pub use models::{
