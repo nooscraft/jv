@@ -12,7 +12,7 @@ use crate::models::{Artifact, MavenCoordinate};
 use dirs::cache_dir;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tracing::debug;
+use tracing::{debug, info};
 
 #[derive(Clone)]
 pub struct CacheManager {
@@ -177,12 +177,91 @@ impl CacheManager {
         Ok(())
     }
 
-    /// Best-effort prune of empty directories (can be extended with LRU + size limits later).
-    pub fn prune(&self) -> Result<()> {
-        // Placeholder for future sophistication (size budgets, last-access tracking, etc.)
-        debug!("cache prune requested (no-op in current implementation)");
+    /// Prune old entries from the cache.
+    ///
+    /// Currently removes any file older than `max_age_days` (default 90).
+    /// Also removes empty directories.
+    ///
+    /// This is safe to run periodically. It helps keep the cache from growing
+    /// unbounded when testing on many different Java projects.
+    pub fn prune(&self, max_age_days: u64) -> Result<()> {
+        let cutoff = std::time::SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(max_age_days * 24 * 3600))
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+
+        let mut removed = 0usize;
+        let mut freed_bytes: u64 = 0;
+
+        for dir in ["poms", "artifacts", "metadata"] {
+            let dir_path = self.root.join(dir);
+            if !dir_path.exists() {
+                continue;
+            }
+
+            let entries = walk_dir(&dir_path);
+            for entry in entries {
+                if let Ok(metadata) = entry.metadata() {
+                    if let Ok(modified) = metadata.modified() {
+                        if modified < cutoff {
+                            let size = metadata.len();
+                            if let Err(e) = fs::remove_file(&entry) {
+                                debug!("Failed to remove old cache entry {:?}: {}", entry, e);
+                            } else {
+                                removed += 1;
+                                freed_bytes += size;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Best-effort: remove empty directories
+            let _ = remove_empty_dirs(&dir_path);
+        }
+
+        if removed > 0 {
+            info!(
+                "Cache prune removed {} old entries, freed ~{:.1} MB",
+                removed,
+                freed_bytes as f64 / 1024.0 / 1024.0
+            );
+        } else {
+            debug!("Cache prune: nothing to remove (all entries younger than {} days)", max_age_days);
+        }
+
         Ok(())
     }
+}
+
+// --- Helper functions for prune ---
+
+fn walk_dir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                files.extend(walk_dir(&path));
+            } else {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
+fn remove_empty_dirs(dir: &std::path::Path) -> std::io::Result<()> {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let _ = remove_empty_dirs(&path);
+                // Try to remove if now empty
+                let _ = fs::remove_dir(&path);
+            }
+        }
+    }
+    Ok(())
 }
 
 impl Default for CacheManager {

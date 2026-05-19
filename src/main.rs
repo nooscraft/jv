@@ -95,8 +95,19 @@ async fn main() -> Result<()> {
             println!("Updating dependency: {}", args.dependency);
         }
         Commands::Cache(args) => match args.command {
-            jv::cli::CacheCommands::Clean => println!("Cleaning cache..."),
-            jv::cli::CacheCommands::Prune => println!("Pruning cache..."),
+            jv::cli::CacheCommands::Clean => {
+                if let Ok(cache) = jv::cache::CacheManager::new() {
+                    let _ = cache.clear();
+                    println!("Cache cleared.");
+                }
+            }
+            jv::cli::CacheCommands::Prune => {
+                if let Ok(cache) = jv::cache::CacheManager::new() {
+                    // Prune entries older than 90 days by default
+                    let _ = cache.prune(90);
+                    println!("Cache pruned (entries older than 90 days removed).");
+                }
+            }
         },
 
         Commands::Tree(_args) => {

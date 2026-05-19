@@ -142,9 +142,7 @@ pub async fn resolve_transitive(
     let mut visited_poms: HashSet<(String, String, String)> = HashSet::new();
     let mut problems: Vec<String> = Vec::new();  // Collect issues for final report
 
-    // Cache effectiveness tracking (very useful when testing on real projects)
-    let mut pom_cache_hits: usize = 0;
-    let mut pom_cache_misses: usize = 0;
+    // (counters moved to atomic globals in effective.rs for simplicity)
 
     while let Some(work) = to_visit.pop_front() {
         let dep = &work.dep;
