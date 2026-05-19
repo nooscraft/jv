@@ -92,5 +92,9 @@ pub enum CacheCommands {
     Clean,
 
     /// Remove unused or stale entries from the cache.
-    Prune,
+    Prune {
+        /// Remove entries older than this many days (default: 90).
+        #[arg(long, default_value_t = 90)]
+        max_age_days: u64,
+    },
 }

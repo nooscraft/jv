@@ -102,11 +102,23 @@ async fn main() -> Result<()> {
                     println!("Cache cleared.");
                 }
             }
-            jv::cli::CacheCommands::Prune => {
+            jv::cli::CacheCommands::Prune { max_age_days } => {
                 if let Ok(cache) = jv::cache::CacheManager::new() {
-                    // Prune entries older than 90 days by default
-                    let _ = cache.prune(90);
-                    println!("Cache pruned (entries older than 90 days removed).");
+                    match cache.prune(max_age_days) {
+                        Ok((count, bytes)) => {
+                            if count > 0 {
+                                println!(
+                                    "Cache pruned: removed {} entries, freed ~{:.1} MB (older than {} days).",
+                                    count,
+                                    bytes as f64 / 1024.0 / 1024.0,
+                                    max_age_days
+                                );
+                            } else {
+                                println!("Cache prune: nothing older than {} days to remove.", max_age_days);
+                            }
+                        }
+                        Err(e) => eprintln!("Cache prune failed: {}", e),
+                    }
                 }
             }
         },

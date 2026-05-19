@@ -211,12 +211,11 @@ impl CacheManager {
 
     /// Prune old entries from the cache.
     ///
-    /// Currently removes any file older than `max_age_days` (default 90).
+    /// Removes any file older than `max_age_days`.
     /// Also removes empty directories.
     ///
-    /// This is safe to run periodically. It helps keep the cache from growing
-    /// unbounded when testing on many different Java projects.
-    pub fn prune(&self, max_age_days: u64) -> Result<()> {
+    /// Returns the number of files removed and the approximate bytes freed.
+    pub fn prune(&self, max_age_days: u64) -> Result<(usize, u64)> {
         let cutoff = std::time::SystemTime::now()
             .checked_sub(std::time::Duration::from_secs(max_age_days * 24 * 3600))
             .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
@@ -261,7 +260,7 @@ impl CacheManager {
             debug!("Cache prune: nothing to remove (all entries younger than {} days)", max_age_days);
         }
 
-        Ok(())
+        Ok((removed, freed_bytes))
     }
 
     // ---------- BOM Effective Data (for import-scoped BOMs) ----------
