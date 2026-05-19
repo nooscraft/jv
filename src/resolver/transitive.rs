@@ -62,6 +62,9 @@ pub async fn resolve_transitive(
 
     let mut to_visit: VecDeque<WorkItem> = VecDeque::new();
 
+    // Simple progress tracking for large real-world projects (Spring Boot etc.)
+    let mut processed = 0usize;
+
     // Seed directly from the parsed root POM (we have it on disk).
     // Full effective-POM merging for the root (parent + depMgmt) is done
     // when we process each transitive child.
@@ -117,6 +120,11 @@ pub async fn resolve_transitive(
         );
         if !visited_poms.insert(visit_key) {
             continue;
+        }
+
+        processed += 1;
+        if processed % 25 == 0 {
+            info!("Resolved {} artifacts so far...", processed);
         }
 
         // Fetch effective POM
@@ -195,7 +203,7 @@ pub async fn resolve_transitive(
             .then_with(|| a.coordinate.artifact_id.cmp(&b.coordinate.artifact_id))
     });
 
-    info!("Transitive resolution complete: {} artifacts", dependencies.len());
+    info!("Transitive resolution complete: {} artifacts (processed {} POMs)", dependencies.len(), processed);
 
     Ok(Resolution {
         root: root_pom.coordinate,
