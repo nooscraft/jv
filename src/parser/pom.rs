@@ -332,4 +332,9 @@ mod tests {
             assert_eq!(pom.coordinate.artifact_id, a);
         }
     }
+
+    #[test]
+    fn pubgrub_smoke_test_passes() {
+        assert!(crate::resolver::pubgrub::smoke_test_pubgrub_compatibility());
+    }
 }

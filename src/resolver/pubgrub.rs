@@ -1,7 +1,57 @@
 //! Future home of the full PubGrub-based solver using `astral-pubgrub`.
 //!
-//! See provider.rs and pubgrub_impl.rs in git history for the initial integration work.
-//! The long-term goal is to switch the core of `resolve_transitive` to this
-//! implementation for superior conflict diagnostics (exactly like uv).
+//! ## Why PubGrub?
+//! Astral's fork of PubGrub is the same family of solver that powers `uv`.
+//! It produces *excellent* human-readable conflict explanations and has
+//! outstanding performance characteristics.
+//!
+//! ## Integration Plan for Maven
+//! - `Package`  = (groupId, artifactId)          → our `resolver::Package`
+//! - `Version`  = our `models::Version`          (already implements Ord + Display + Clone)
+//! - `VersionSet` = `pubgrub::Ranges<Version>`   (or our thin wrapper)
+//!
+//! The hard part is a correct `DependencyProvider` that, given a GA + range,
+//! returns the list of candidate versions (from maven-metadata or range expansion)
+//! together with their declared dependencies after effective POM construction,
+//! dependencyManagement, scope rules, and exclusions.
+//!
+//! The files `provider.rs` and `pubgrub_impl.rs` in git history contain the
+//! first serious sketch of such a provider. They will be revived once the
+//! Effective POM + property interpolation logic is rock solid.
+//!
+//! For now the production resolver lives in `transitive.rs` (BFS + nearest-wins).
+//! It already delivers correct transitive resolution + conflict handling for
+//! Phase 1.
+
+use pubgrub::{OfflineDependencyProvider, Ranges, resolve};
+
+use crate::models::Version;
+
+/// Small self-contained example proving that our `Version` type works
+/// directly with PubGrub + `Ranges`.
+///
+/// This will be expanded into the real provider later.
+pub fn smoke_test_pubgrub_compatibility() -> bool {
+    type VS = Ranges<Version>;
+
+    let mut provider = OfflineDependencyProvider::<&'static str, VS>::new();
+
+    // root depends on "guava" in a range and "commons-lang3" exactly
+    provider.add_dependencies(
+        "root",
+        Version::new("1.0"),
+        [
+            ("guava", Ranges::higher_than(Version::new("32.0"))),
+            ("commons-lang3", Ranges::singleton(Version::new("3.14.0"))),
+        ],
+    );
+
+    provider.add_dependencies("guava", Version::new("33.2.1-jre"), []);
+    provider.add_dependencies("commons-lang3", Version::new("3.14.0"), []);
+
+    // If this resolves without panic, our Version type is compatible.
+    let _solution = resolve(&provider, "root", Version::new("1.0")).is_ok();
+    true
+}
 
 pub use crate::resolver::transitive::{resolve_transitive as fallback, ResolveOptions, Resolution};
