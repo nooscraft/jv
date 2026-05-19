@@ -8,8 +8,10 @@
 //! The layout is intentionally human-inspectable and easy to rsync or clean.
 
 use crate::error::{JvError, Result};
-use crate::models::{Artifact, MavenCoordinate};
+use crate::models::{Artifact, MavenCoordinate, Version};
 use dirs::cache_dir;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
@@ -17,6 +19,16 @@ use tracing::{debug, info};
 #[derive(Clone)]
 pub struct CacheManager {
     root: PathBuf,
+}
+
+/// Cached effective data extracted from an imported BOM (e.g. spring-boot-dependencies).
+/// This allows much faster repeated resolutions on Spring Boot / BOM-heavy projects.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CachedBomData {
+    /// GA -> Version (from the BOM's dependencyManagement)
+    pub managed_versions: HashMap<String, String>,
+    /// Key properties from the BOM that are commonly used for version interpolation
+    pub properties: HashMap<String, String>,
 }
 
 impl CacheManager {
@@ -229,6 +241,59 @@ impl CacheManager {
             debug!("Cache prune: nothing to remove (all entries younger than {} days)", max_age_days);
         }
 
+        Ok(())
+    }
+
+    // ---------- BOM Effective Data (for import-scoped BOMs) ----------
+
+    fn bom_effective_path(&self, group_id: &str, artifact_id: &str, version: &Version) -> PathBuf {
+        self.root
+            .join("effective-boms")
+            .join(group_id.replace('.', "/"))
+            .join(artifact_id)
+            .join(format!("{}.json", version))
+    }
+
+    /// Try to load previously extracted effective data for an imported BOM.
+    pub fn get_bom_effective(
+        &self,
+        group_id: &str,
+        artifact_id: &str,
+        version: &Version,
+    ) -> Option<CachedBomData> {
+        let path = self.bom_effective_path(group_id, artifact_id, version);
+        fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .inspect(|_| {
+                debug!("cache hit for effective BOM data {}:{}:{}", group_id, artifact_id, version);
+            })
+    }
+
+    /// Store the effective data we extracted from an imported BOM so future
+    /// resolutions of the same project (or similar ones) are much faster.
+    pub fn put_bom_effective(
+        &self,
+        group_id: &str,
+        artifact_id: &str,
+        version: &Version,
+        data: &CachedBomData,
+    ) -> Result<()> {
+        let path = self.bom_effective_path(group_id, artifact_id, version);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| JvError::Cache {
+                path: parent.to_path_buf(),
+                reason: e.to_string(),
+            })?;
+        }
+        let json = serde_json::to_string_pretty(data).map_err(|e| JvError::Cache {
+            path: path.clone(),
+            reason: e.to_string(),
+        })?;
+        fs::write(&path, json).map_err(|e| JvError::Cache {
+            path,
+            reason: e.to_string(),
+        })?;
         Ok(())
     }
 }

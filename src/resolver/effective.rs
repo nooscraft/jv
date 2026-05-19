@@ -111,11 +111,41 @@ impl EffectivePom {
             for dm in &pom.dependency_management {
                 let key = (dm.coordinate.group_id.clone(), dm.coordinate.artifact_id.clone());
                 if dm.scope == Scope::Import {
-                    // Best-effort import of BOM (non-recursive to avoid complexity)
-                    // We fetch the POM and steal its dependencyManagement entries.
+                    let bom_group = &dm.coordinate.group_id;
+                    let bom_artifact = &dm.coordinate.artifact_id;
+                    let bom_version = &dm.coordinate.version;
+
+                    // Fast path: use previously cached effective data from this BOM
+                    if let Some(cached) = cache.get_bom_effective(bom_group, bom_artifact, bom_version) {
+                        for (imp_key_str, ver_str) in cached.managed_versions {
+                            // Reconstruct a minimal Dependency for dep_mgmt
+                            if let Some((g, a)) = imp_key_str.split_once(':') {
+                                if let Ok(ver) = Version::parse(&ver_str) {
+                                    let mut managed_dep = Dependency::new(g, a, "");
+                                    managed_dep.coordinate.version = ver;
+                                    let imp_key = (g.to_string(), a.to_string());
+                                    dep_mgmt.insert(imp_key, managed_dep);
+                                }
+                            }
+                        }
+                        for (k, v) in cached.properties {
+                            properties.entry(k).or_insert(v);
+                        }
+                        continue;
+                    }
+
+                    // Slow path: fetch and parse the BOM
                     if let Ok(imported_xml) = client.fetch_pom(&dm.coordinate).await {
                         if let Ok(imported_pom) = Pom::parse(&imported_xml) {
-                            // Merge dependencyManagement
+                            // First, collect data we want to cache
+                            let mut managed_versions = HashMap::new();
+                            for imp_dm in &imported_pom.dependency_management {
+                                let k = format!("{}:{}", imp_dm.coordinate.group_id, imp_dm.coordinate.artifact_id);
+                                managed_versions.insert(k, imp_dm.coordinate.version.raw.clone());
+                            }
+                            let bom_properties = imported_pom.properties.clone();
+
+                            // Merge into current effective view
                             for imp_dm in imported_pom.dependency_management {
                                 let imp_key = (
                                     imp_dm.coordinate.group_id.clone(),
@@ -123,10 +153,16 @@ impl EffectivePom {
                                 );
                                 dep_mgmt.entry(imp_key).or_insert(imp_dm);
                             }
-                            // Also bring properties from the BOM (very common in Spring Boot etc.)
-                            for (k, v) in imported_pom.properties {
-                                properties.entry(k).or_insert(v);
+                            for (k, v) in bom_properties.iter() {
+                                properties.entry(k.clone()).or_insert(v.clone());
                             }
+
+                            // Persist for future runs
+                            let bom_data = crate::cache::CachedBomData {
+                                managed_versions,
+                                properties: bom_properties,
+                            };
+                            let _ = cache.put_bom_effective(bom_group, bom_artifact, bom_version, &bom_data);
                         }
                     }
                     continue;

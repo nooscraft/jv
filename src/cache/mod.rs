@@ -6,4 +6,4 @@
 
 pub mod manager;
 
-pub use manager::CacheManager;
+pub use manager::{CacheManager, CachedBomData};

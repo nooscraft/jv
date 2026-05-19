@@ -28,6 +28,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1"
 regex = "1"
+serde_json = "1"
 # PubGrub solver — using Astral's fork for best alignment with uv's philosophy,
 # excellent error messages, and performance characteristics.
 astral-pubgrub = { version = "0.3", features = ["serde"] }
