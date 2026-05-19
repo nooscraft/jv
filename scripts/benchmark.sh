@@ -18,6 +18,15 @@ PROJECT_PATH="${1:-.}"
 MODE="${2:-warm}"
 MAX_AGE_DAYS=90
 
+# Create results directory if it doesn't exist
+RESULTS_DIR="$(dirname "$0")/../results"
+mkdir -p "$RESULTS_DIR"
+
+# Generate timestamped result file
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+PROJECT_NAME=$(basename "$PROJECT_PATH")
+RESULT_FILE="$RESULTS_DIR/${PROJECT_NAME}_${TIMESTAMP}.txt"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -36,16 +45,19 @@ print_section() {
 }
 
 log() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+    echo -e "${GREEN}[INFO]${NC} $1" | tee -a "$RESULT_FILE"
 }
 
 warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    echo -e "${YELLOW}[WARN]${NC} $1" | tee -a "$RESULT_FILE"
 }
 
 error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1" | tee -a "$RESULT_FILE"
 }
+
+# Also capture raw output
+echo "=== jv Benchmark Run: $(date) ===" > "$RESULT_FILE"
 
 # Resolve absolute path
 PROJECT_PATH=$(cd "$PROJECT_PATH" && pwd)
@@ -88,6 +100,11 @@ echo "jv (git):         $JV_VERSION"
 run_maven_benchmark() {
     print_section "Running Maven benchmark"
 
+    if ! command -v mvn >/dev/null 2>&1; then
+        warn "Maven (mvn) not found in PATH — skipping Maven benchmark"
+        return 0
+    fi
+
     local start end duration
 
     # Clean Maven local cache for cold runs
@@ -98,15 +115,10 @@ run_maven_benchmark() {
 
     start=$(date +%s.%N)
 
-    if command -v mvn >/dev/null 2>&1; then
-        (
-            cd "$PROJECT_PATH"
-            mvn dependency:go-offline -B -q
-        )
-    else
-        error "Maven (mvn) not found in PATH"
-        return 1
-    fi
+    (
+        cd "$PROJECT_PATH"
+        mvn dependency:go-offline -B -q
+    )
 
     end=$(date +%s.%N)
     duration=$(echo "$end - $start" | bc)
@@ -121,6 +133,7 @@ run_jv_benchmark() {
 
     local jv_bin
     local start end duration
+    local artifacts="unknown"
 
     # Try release binary first, fall back to cargo run
     if [[ -f "$(dirname "$0")/../target/release/jv" ]]; then
@@ -143,11 +156,19 @@ run_jv_benchmark() {
 
     start=$(date +%s.%N)
 
-    if eval "$jv_cmd"; then
+    # Capture output to parse artifact count
+    local jv_output
+    if jv_output=$(eval "$jv_cmd" 2>&1); then
+        echo "$jv_output"
         end=$(date +%s.%N)
         duration=$(echo "$end - $start" | bc)
+
+        # Extract artifact count (handles both "Resolved X artifacts" and the new log format)
+        artifacts=$(echo "$jv_output" | grep -oE "(Resolved [0-9]+ artifacts|Transitive resolution complete: [0-9]+ artifacts)" | grep -oE "[0-9]+" | head -1 || echo "unknown")
+
         echo ""
         log "jv resolve completed in ${duration}s"
+        log "Artifacts resolved: $artifacts"
     else
         error "jv resolve failed"
         return 1
@@ -172,4 +193,6 @@ esac
 
 echo ""
 log "Benchmark run complete."
-echo "You can copy the output above into BENCHMARKS.md or results/ for tracking."
+log "Full results saved to: $RESULT_FILE"
+echo ""
+echo "You can copy relevant parts into BENCHMARKS.md for long-term tracking."
