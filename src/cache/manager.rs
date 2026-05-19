@@ -20,6 +20,10 @@ use tracing::{debug, info};
 #[derive(Clone)]
 pub struct CacheManager {
     root: PathBuf,
+    /// Optional namespace for this cache instance.
+    /// Used to separate caches for different Maven repositories.
+    /// Maven Central uses no namespace (empty).
+    repo_namespace: Option<String>,
 }
 
 /// Cached effective data extracted from an imported BOM (e.g. spring-boot-dependencies).
@@ -35,6 +39,11 @@ pub struct CachedBomData {
 impl CacheManager {
     /// Create a cache manager using the platform-appropriate cache directory.
     pub fn new() -> Result<Self> {
+        Self::new_with_namespace(None)
+    }
+
+    /// Create a cache manager with an optional repository namespace.
+    pub fn new_with_namespace(namespace: Option<String>) -> Result<Self> {
         let root = cache_dir()
             .ok_or_else(|| JvError::Cache {
                 path: PathBuf::from("~/.cache"),
@@ -47,27 +56,71 @@ impl CacheManager {
             reason: e.to_string(),
         })?;
 
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            repo_namespace: namespace,
+        })
     }
 
     /// Create with an explicit root (primarily for tests).
     pub fn with_root(root: impl Into<PathBuf>) -> Result<Self> {
+        Self::with_root_and_namespace(root, None)
+    }
+
+    /// Create with explicit root + optional namespace (for tests).
+    pub fn with_root_and_namespace(
+        root: impl Into<PathBuf>,
+        namespace: Option<String>,
+    ) -> Result<Self> {
         let root = root.into();
         fs::create_dir_all(&root).map_err(|e| JvError::Cache {
             path: root.clone(),
             reason: e.to_string(),
         })?;
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            repo_namespace: namespace,
+        })
+    }
+
+    /// Returns the effective root path, including the repository namespace if present.
+    fn effective_root(&self) -> PathBuf {
+        match &self.repo_namespace {
+            Some(ns) => self.root.join("repos").join(ns),
+            None => self.root.clone(),
+        }
     }
 
     pub fn root(&self) -> &Path {
         &self.root
     }
 
+    /// Returns the namespace of this cache instance, if any.
+    pub fn namespace(&self) -> Option<&str> {
+        self.repo_namespace.as_deref()
+    }
+
+    /// Create a new CacheManager for a specific repository URL.
+    /// Maven Central returns a non-namespaced manager.
+    /// Custom repos get a short hash-based namespace.
+    pub fn for_repository(repo_url: &str) -> Result<Self> {
+        if Self::is_maven_central(repo_url) {
+            Self::new()
+        } else {
+            let hash = format!("{:x}", Sha256::digest(repo_url.as_bytes()));
+            let short_hash = &hash[..12]; // 12 chars is plenty
+            Self::new_with_namespace(Some(short_hash.to_string()))
+        }
+    }
+
+    fn is_maven_central(url: &str) -> bool {
+        url.contains("repo.maven.apache.org") || url.contains("maven-central.storage-download")
+    }
+
     // ---------- Metadata ----------
 
     pub fn metadata_path(&self, group_id: &str, artifact_id: &str) -> PathBuf {
-        self.root
+        self.effective_root()
             .join("metadata")
             .join(group_id.replace('.', "/"))
             .join(artifact_id)
@@ -99,7 +152,7 @@ impl CacheManager {
     // ---------- POMs ----------
 
     pub fn pom_path(&self, coord: &MavenCoordinate) -> PathBuf {
-        self.root
+        self.effective_root()
             .join("poms")
             .join(coord.group_id.replace('.', "/"))
             .join(&coord.artifact_id)
@@ -163,7 +216,7 @@ impl CacheManager {
         name.push('.');
         name.push_str(&artifact.extension);
 
-        self.root
+        self.effective_root()
             .join("artifacts")
             .join(artifact.coordinate.group_id.replace('.', "/"))
             .join(&artifact.coordinate.artifact_id)
@@ -199,10 +252,12 @@ impl CacheManager {
     // ---------- Maintenance ----------
 
     /// Remove the entire cache (dangerous, mostly for tests or `jv cache clean`).
+    /// If this instance has a namespace, only that namespace is cleared.
     pub fn clear(&self) -> Result<()> {
-        if self.root.exists() {
-            fs::remove_dir_all(&self.root).map_err(|e| JvError::Cache {
-                path: self.root.clone(),
+        let target = self.effective_root();
+        if target.exists() {
+            fs::remove_dir_all(&target).map_err(|e| JvError::Cache {
+                path: target,
                 reason: e.to_string(),
             })?;
         }
@@ -266,7 +321,7 @@ impl CacheManager {
     // ---------- BOM Effective Data (for import-scoped BOMs) ----------
 
     fn bom_effective_path(&self, group_id: &str, artifact_id: &str, version: &Version) -> PathBuf {
-        self.root
+        self.effective_root()
             .join("effective-boms")
             .join(group_id.replace('.', "/"))
             .join(artifact_id)
