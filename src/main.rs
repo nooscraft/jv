@@ -61,8 +61,32 @@ async fn main() -> Result<()> {
 
                 // Also demonstrate the old direct path is still available via the library
                 // for comparison during the transition period.
+            } else if file.extension().map_or(false, |e| e == "gradle" || e == "kts") {
+                // Basic Gradle path (uses the new declarative parser)
+                println!("Parsing Gradle file (declarative dependencies only)...");
+                let content = std::fs::read_to_string(&file).unwrap_or_default();
+                let gradle_deps = jv::parser::gradle::parse_build_gradle(&content);
+                println!("Found {} dependencies in Gradle file", gradle_deps.len());
+
+                // For now just treat them as direct deps (real transitive coming later)
+                let mut resolved = Vec::new();
+                for d in gradle_deps {
+                    resolved.push(jv::models::ResolvedDependency {
+                        coordinate: d.coordinate,
+                        scope: d.scope,
+                        optional: d.optional,
+                        depended_by: None,
+                        artifacts: vec![],
+                    });
+                }
+
+                if !args.dry_run {
+                    let lock = LockFile::from_resolved(&resolved);
+                    write_lock_file(&args.output, &lock)?;
+                    println!("Lock file written to {}", args.output.display());
+                }
             } else {
-                println!("Gradle files are not fully supported in this build (coming soon).");
+                println!("Unsupported build file. Supported: pom.xml, build.gradle, build.gradle.kts");
             }
         }
         Commands::Verify => {

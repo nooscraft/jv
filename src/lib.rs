@@ -9,6 +9,8 @@ pub mod error;
 pub mod lockfile;
 pub mod models;
 pub mod parser;
+
+pub use parser::gradle;
 pub mod repository;
 pub mod resolver;
 
