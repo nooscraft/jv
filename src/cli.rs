@@ -52,6 +52,11 @@ pub struct ResolveArgs {
     /// Perform a dry run without writing the lock file.
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Bypass the local cache and fetch everything fresh from the network.
+    /// Useful when developing the resolver or when you suspect stale data.
+    #[arg(long)]
+    pub no_cache: bool,
 }
 
 #[derive(Args, Debug)]

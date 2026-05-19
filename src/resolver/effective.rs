@@ -48,6 +48,7 @@ impl EffectivePom {
         coord: &MavenCoordinate,
         client: &RepositoryClient,
         cache: &CacheManager,
+        no_cache: bool,
     ) -> Result<Self> {
         let mut current = coord.clone();
         let mut chain: Vec<Pom> = Vec::new();
@@ -60,8 +61,13 @@ impl EffectivePom {
                 break; // cycle guard
             }
 
-            // Try cache first
-            let xml = if let Some(xml) = cache.get_pom(&current) {
+            // Try cache first (unless --no-cache)
+            let xml = if no_cache {
+                debug!("effective POM: --no-cache, fetching {}", current);
+                let xml = client.fetch_pom(&current).await?;
+                let _ = cache.put_pom(&current, &xml);
+                xml
+            } else if let Some(xml) = cache.get_pom(&current) {
                 POM_CACHE_HITS.fetch_add(1, Ordering::Relaxed);
                 debug!("effective POM: cache hit for {}", current);
                 xml
@@ -69,7 +75,6 @@ impl EffectivePom {
                 POM_CACHE_MISSES.fetch_add(1, Ordering::Relaxed);
                 debug!("effective POM: cache miss, fetching {}", current);
                 let xml = client.fetch_pom(&current).await?;
-                // Opportunistically cache it
                 let _ = cache.put_pom(&current, &xml);
                 xml
             };

@@ -20,6 +20,8 @@ use tracing::{debug, info, warn};
 #[derive(Debug, Clone, Default)]
 pub struct ResolveOptions {
     pub extra_repositories: Vec<String>,
+    /// Bypass reading from the local cache (still writes results).
+    pub no_cache: bool,
 }
 
 /// Successful resolution result.
@@ -81,7 +83,7 @@ pub async fn resolve_transitive(
 
     // 2. Pull from the root's parent chain (Spring Boot parent + its BOMs)
     if let Some(parent) = &root_pom.parent {
-        match EffectivePom::for_coordinate(parent, &client, &cache).await {
+        match EffectivePom::for_coordinate(parent, &client, &cache, options.no_cache).await {
             Ok(parent_effective) => {
                 for (key, dm) in parent_effective.dependency_management {
                     root_managed.entry(key).or_insert(dm.coordinate.version.clone());
@@ -187,7 +189,7 @@ pub async fn resolve_transitive(
         }
 
         // Fetch effective POM
-        let effective = match EffectivePom::for_coordinate(&resolved_coord, &client, &cache).await {
+        let effective = match EffectivePom::for_coordinate(&resolved_coord, &client, &cache, options.no_cache).await {
             Ok(e) => e,
             Err(e) => {
                 let msg = format!("{}: {}", resolved_coord, e);
