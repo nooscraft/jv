@@ -57,17 +57,17 @@ jv can already be used productively on real projects:
 
 We are actively hardening the resolver on large, real-world Spring Boot and enterprise Java projects.
 
-## Performance
+## Performance (Early Data)
 
-jv is designed around three performance pillars:
+`jv` is built around three performance pillars: parallel downloads, a global content-addressable cache, and an efficient resolver.
 
-- Parallel artifact downloading
-- Aggressive global caching (share common dependencies across projects)
-- Efficient resolution algorithms
+Early structured benchmarks on real multi-module Spring Boot projects show:
 
-Real-world benchmarks comparing `jv` against Maven and Gradle are currently being collected. Early results on multi-module Spring Boot applications look promising, especially on repeated runs thanks to the global cache.
+- Strong cache effectiveness on repeated runs (often 20–40% of POMs served from the global cache).
+- Steady improvement in the number of resolved artifacts as BOM and profile handling gets deeper.
+- On the primary test project, recent warm-cache runs resolve ~49 artifacts in ~60–70 seconds (with 40+ cache hits). No-cache runs are slower but still functional.
 
-See [BENCHMARKS.md](./BENCHMARKS.md) for methodology and results (work in progress).
+We are deliberately collecting real, reproducible data before making specific speed claims. Full methodology and ongoing results are available in [BENCHMARKS.md](./BENCHMARKS.md).
 
 ## Documentation
 
