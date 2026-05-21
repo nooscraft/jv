@@ -100,8 +100,10 @@ echo "jv (git):         $JV_VERSION"
 run_maven_benchmark() {
     print_section "Running Maven benchmark"
 
-    if ! command -v mvn >/dev/null 2>&1; then
-        warn "Maven (mvn) not found in PATH — skipping Maven benchmark"
+    # Try to locate Maven (especially on macOS + Homebrew)
+    MVN_CMD=$(command -v mvn 2>/dev/null || command -v /opt/homebrew/bin/mvn 2>/dev/null || echo "")
+    if [[ -z "$MVN_CMD" ]]; then
+        warn "Maven (mvn) not found in PATH or common Homebrew location — skipping Maven benchmark"
         return 0
     fi
 
@@ -117,7 +119,7 @@ run_maven_benchmark() {
 
     (
         cd "$PROJECT_PATH"
-        mvn dependency:go-offline -B -q
+        "$MVN_CMD" dependency:go-offline -B -q
     )
 
     end=$(date +%s.%N)
