@@ -63,6 +63,8 @@ Structured benchmarking framework is now in place (`scripts/benchmark.sh` + `res
 | 2026-05-19 | micro-server-own   | warm  | 0.56s   | 3                  | Warm cache run                             | `micro-server-own_20260519_152335.txt`   |
 | 2026-05-19 | micro-server-own   | cold      | 0.65s    | 3                  | Cold cache (jv cache cleared before run)          | `micro-server-own_20260519_152725.txt`   |
 | 2026-05-19 | micro-server-own   | no-cache  | 79.3s    | 49                 | Full no-cache run with improved resolver          | `micro-server-own_20260519_153032.txt`   |
+| 2026-05-21 | micro-server-own   | warm      | 31.0s    | 25                 | First run with Maven available (Maven failed quickly) | `micro-server-own_20260521_102011.txt` |
+| 2026-05-21 | micro-server-own   | warm      | 67.1s    | 49                 | Later warm run after further improvements             | `micro-server-own_20260521_100933.txt` |
 
 **Environment (both runs)**:
 - OS / Arch: macOS arm64 (Darwin)
@@ -70,13 +72,13 @@ Structured benchmarking framework is now in place (`scripts/benchmark.sh` + `res
 - Maven: Not available in this environment
 - jv: Built from source (release binary)
 
-**Key Observations**:
-- Cold cache run was ~16% slower than warm cache (expected).
-- The `no-cache` run took significantly longer (79s) but resolved **49 artifacts** thanks to recent resolver improvements (deeper BOM + ancestor property handling).
-- Resolution quality has improved noticeably between runs.
-- Homebrew is available in the environment; `brew install maven` was started to enable direct jv vs Maven comparisons (installation can take time on first run).
+**Key Observations (latest runs)**:
+- First run with Maven available (2026-05-21): Maven `dependency:go-offline` took **1.51s** but failed due to repository configuration in the old project. jv took **31s** and resolved ~25 artifacts.
+- Later warm run on the same day: jv took **67s** and resolved **49 artifacts** (40 cache hits).
+- Clear trend: resolver completeness is improving with each round of BOM + profile work.
+- Maven comparisons are currently limited by the project's outdated repository setup.
 
-As resolver improvements continue, we expect both speed and completeness to improve further on this and similar projects.
+We will continue collecting data as the resolver gets stronger.
 
 ## Example Output
 
