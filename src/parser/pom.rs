@@ -148,9 +148,16 @@ pub struct Profile {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Activation {
-    #[serde(default)]
     pub active_by_default: Option<bool>,
+    pub property: Option<ActivationProperty>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ActivationProperty {
+    pub name: Option<String>,
+    pub value: Option<String>,
 }
 
 /// High-level representation of a parsed POM ready for the resolver.
@@ -239,14 +246,12 @@ impl Pom {
             .map(|p| p.entries)
             .unwrap_or_default();
 
-        // Very basic profile activation for property merging:
-        // - Profiles with <activation><activeByDefault>true</activeByDefault> are active.
-        // - Profiles with no <activation> at all are also treated as active (common pattern).
+        // Profile activation (basic but useful for real projects):
+        // - activeByDefault
+        // - No activation element → treat as active
+        // - Property activation (name + optional value)
         for profile in &profiles {
-            let is_active = profile.activation.as_ref()
-                .map(|act| act.active_by_default == Some(true))
-                .unwrap_or(true);
-
+            let is_active = is_profile_active(profile, &properties);
             if is_active {
                 if let Some(props) = &profile.properties {
                     for (k, v) in &props.entries {
@@ -266,6 +271,34 @@ impl Pom {
             modules,
             profiles,
         })
+    }
+
+    fn is_profile_active(profile: &Profile, current_properties: &HashMap<String, String>) -> bool {
+        match &profile.activation {
+            Some(act) => {
+                if act.active_by_default == Some(true) {
+                    return true;
+                }
+
+                if let Some(prop_act) = &act.property {
+                    if let Some(name) = &prop_act.name {
+                        match &prop_act.value {
+                            Some(expected) => {
+                                // Exact value match
+                                return current_properties.get(name).map_or(false, |v| v == expected);
+                            }
+                            None => {
+                                // Property just needs to be present
+                                return current_properties.contains_key(name);
+                            }
+                        }
+                    }
+                }
+
+                false
+            }
+            None => true, // No activation → treat as active (common)
+        }
     }
 
     fn convert_dependencies(xml_deps: Vec<DependencyXml>, _props: &HashMap<String, String>) -> Vec<Dependency> {
