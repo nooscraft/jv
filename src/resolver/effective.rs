@@ -161,19 +161,39 @@ impl EffectivePom {
 
                     match Box::pin(Self::for_coordinate_impl(bom_coord, client, cache, no_cache, depth + 1)).await {
                         Ok(imported_effective) => {
-                            // Merge everything we got from the effective view of the BOM
-                            for (imp_key, imp_dm) in &imported_effective.dependency_management {
-                                dep_mgmt.entry(imp_key.clone()).or_insert(imp_dm.clone());
-                            }
+                            // Merge properties first (they may help resolve versions from this BOM)
                             for (k, v) in &imported_effective.properties {
                                 properties.entry(k.clone()).or_insert(v.clone());
                             }
 
-                            // Persist a useful cache entry for next time
+                            // Merge dependencyManagement, resolving placeholders where possible
+                            let mut newly_resolved = 0usize;
+                            for (imp_key, imp_dm) in &imported_effective.dependency_management {
+                                let resolved_ver_str = crate::resolver::effective::interpolate(&properties, &imp_dm.coordinate.version.raw);
+                                if let Ok(resolved_ver) = Version::parse(&resolved_ver_str) {
+                                    let mut managed_dep = imp_dm.clone();
+                                    managed_dep.coordinate.version = resolved_ver;
+                                    if dep_mgmt.insert(imp_key.clone(), managed_dep).is_none() {
+                                        newly_resolved += 1;
+                                    }
+                                } else {
+                                    dep_mgmt.entry(imp_key.clone()).or_insert(imp_dm.clone());
+                                }
+                            }
+
+                            if newly_resolved > 0 {
+                                debug!(
+                                    "Imported BOM {} contributed {} newly resolved managed versions (after interpolation)",
+                                    bom_coord, newly_resolved
+                                );
+                            }
+
+                            // Build cache data with as many versions pre-resolved as possible
                             let mut managed_versions = HashMap::new();
                             for (imp_key, imp_dm) in &imported_effective.dependency_management {
+                                let resolved = crate::resolver::effective::interpolate(&imported_effective.properties, &imp_dm.coordinate.version.raw);
                                 let k = format!("{}:{}", imp_key.0, imp_key.1);
-                                managed_versions.insert(k, imp_dm.coordinate.version.raw.clone());
+                                managed_versions.insert(k, resolved);
                             }
 
                             let bom_data = crate::cache::CachedBomData {
@@ -186,6 +206,8 @@ impl EffectivePom {
                                 &bom_coord.version,
                                 &bom_data,
                             );
+
+                            debug!("Cached effective data for imported BOM {}", bom_coord);
                         }
                         Err(e) => {
                             debug!("Failed to build effective view for imported BOM {}: {}", bom_coord, e);
