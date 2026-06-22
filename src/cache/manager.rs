@@ -6,6 +6,9 @@
 //!   artifacts/<group>/<artifact>/<version>[-<classifier>].<ext>
 //!
 //! The layout is intentionally human-inspectable and easy to rsync or clean.
+//!
+//! Note: this cache is keyed by Maven coordinate (group/artifact/version), not
+//! by content hash. It is not a content-addressable store.
 
 use crate::error::{JvError, Result};
 use crate::models::{Artifact, MavenCoordinate, Version};

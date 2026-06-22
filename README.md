@@ -7,8 +7,8 @@ A fast, Rust-based dependency resolver for Java and the JVM ecosystem.
 ## Highlights
 
 - **Fast dependency resolution** written in Rust
-- **Global, content-addressable cache** — share dependencies across all your projects
-- **Parallel artifact downloading** with progress reporting
+- **Global, filesystem-backed cache** — human-readable layout, shared across all your projects
+- **Artifact downloading** with progress reporting
 - **Deterministic TOML lockfiles** (`jv.lock`)
 - Works with **existing projects** — no migration required
 - Transitive resolution with conflict handling
