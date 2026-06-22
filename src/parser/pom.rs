@@ -2,6 +2,9 @@
 //!
 //! This parser focuses on the subset needed for dependency resolution. Full
 //! fidelity to every Maven POM feature is intentionally deferred.
+//!
+//! Unrecognized elements are ignored rather than rejected, so a POM that uses
+//! features outside this subset still parses for the fields we care about.
 
 use crate::error::{JvError, Result};
 use crate::models::{Dependency, Exclusion, MavenCoordinate, Scope, Version};
