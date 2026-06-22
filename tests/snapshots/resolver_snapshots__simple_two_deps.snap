@@ -1,0 +1,7 @@
+---
+source: tests/resolver_snapshots.rs
+expression: coords
+---
+[
+  "org.apache.commons:commons-lang3:3.14.0"
+]

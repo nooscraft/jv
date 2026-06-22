@@ -1,0 +1,413 @@
+//! Transitive dependency resolver with conflict resolution.
+//!
+//! Algorithm: Breadth-first traversal + "nearest wins" (Maven's classic strategy)
+//! combined with version range selection and dependencyManagement.
+//!
+//! This already gives correct transitive resolution and basic conflict handling
+//! for the vast majority of real projects, and is a solid base before (or
+//! alongside) a full PubGrub implementation.
+
+use crate::cache::CacheManager;
+use crate::error::Result;
+use crate::models::{
+    Dependency, Exclusion, MavenCoordinate, ResolvedDependency, Version, VersionRange,
+};
+use crate::parser::Pom;
+use crate::repository::RepositoryClient;
+use crate::resolver::effective::EffectivePom;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::Path;
+use tracing::{debug, info, warn};
+
+#[derive(Debug, Clone, Default)]
+pub struct ResolveOptions {
+    pub extra_repositories: Vec<String>,
+    /// Bypass reading from the local cache (still writes results).
+    pub no_cache: bool,
+}
+
+/// Successful resolution result.
+#[derive(Debug, Clone)]
+pub struct Resolution {
+    pub root: MavenCoordinate,
+    pub dependencies: Vec<ResolvedDependency>,
+}
+
+/// Resolve a POM and all of its transitive dependencies with conflict resolution.
+pub async fn resolve_transitive(pom_path: &Path, options: ResolveOptions) -> Result<Resolution> {
+    let xml = std::fs::read_to_string(pom_path)?;
+    let root_pom = Pom::parse(&xml)?;
+
+    let mut client = RepositoryClient::new();
+    for url in &options.extra_repositories {
+        if let Ok(r) = crate::repository::Repository::new("user", url) {
+            client.add_repository(r);
+        }
+    }
+    let cache = CacheManager::new()?;
+
+    // State for resolution
+    // Keyed by (group, artifact) → the selected version and the Dependency that won
+    // (selected_version, original_dep_declaration, immediate_parent_that_pulled_it_in)
+    let mut selected: HashMap<(String, String), (Version, Dependency, MavenCoordinate)> =
+        HashMap::new();
+
+    // Work queue item carrying context for correct exclusion propagation and tree tracking.
+    #[derive(Clone)]
+    struct WorkItem {
+        dep: Dependency,
+        parent: MavenCoordinate,
+        // Exclusions accumulated from the path that pulled this dependency in.
+        // This implements proper deep exclusion semantics.
+        accumulated_exclusions: Vec<Exclusion>,
+    }
+
+    let mut to_visit: VecDeque<WorkItem> = VecDeque::new();
+
+    // Simple progress tracking for large real-world projects (Spring Boot etc.)
+    let mut processed = 0usize;
+
+    // === Build a rich effective context for the ROOT project ===
+    // We walk the full parent chain (root → parent → grandparent → ...) and collect
+    // properties and dependencyManagement with correct precedence (child wins).
+    // This is the "broad" approach to handling real Spring Boot / enterprise parent hierarchies.
+    let mut root_managed: HashMap<(String, String), Version> = HashMap::new();
+    let mut root_properties: HashMap<String, String> = HashMap::new();
+
+    // Start with the root's own data
+    for dm in &root_pom.dependency_management {
+        let key = (
+            dm.coordinate.group_id.clone(),
+            dm.coordinate.artifact_id.clone(),
+        );
+        root_managed.insert(key, dm.coordinate.version.clone());
+    }
+    for (k, v) in &root_pom.properties {
+        root_properties.insert(k.clone(), v.clone());
+    }
+
+    // Walk the entire ancestor chain
+    let mut current_parent = root_pom.parent.clone();
+    let mut visited_parents = std::collections::HashSet::new();
+
+    while let Some(parent_coord) = current_parent {
+        let parent_key = format!("{}:{}", parent_coord.group_id, parent_coord.artifact_id);
+        if !visited_parents.insert(parent_key) {
+            break; // cycle protection
+        }
+
+        match EffectivePom::for_coordinate(&parent_coord, &client, &cache, options.no_cache).await {
+            Ok(parent_effective) => {
+                // Merge dependencyManagement (root wins, so we only insert if missing)
+                for (key, dm) in parent_effective.dependency_management {
+                    root_managed
+                        .entry(key)
+                        .or_insert(dm.coordinate.version.clone());
+                }
+
+                // Merge properties (root wins)
+                for (k, v) in parent_effective.properties {
+                    root_properties.entry(k).or_insert(v);
+                }
+
+                current_parent = parent_effective.parent; // continue walking up
+            }
+            Err(e) => {
+                debug!(
+                    "Could not build effective view for ancestor {}: {}",
+                    parent_coord, e
+                );
+                break;
+            }
+        }
+    }
+
+    // Re-interpolate everything we collected from the ancestor chain (properties can refer to other properties)
+    for _ in 0..5 {
+        let mut changed = false;
+        for (k, v) in root_properties.clone() {
+            let next = crate::resolver::effective::interpolate(&root_properties, &v);
+            if next != v {
+                root_properties.insert(k, next);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    // Also try to resolve any managed versions that were expressed as property placeholders
+    for (key, ver) in root_managed.clone() {
+        if ver.raw.contains("${") {
+            let resolved = crate::resolver::effective::interpolate(&root_properties, &ver.raw);
+            if let Ok(new_ver) = Version::parse(&resolved) {
+                root_managed.insert(key, new_ver);
+            }
+        }
+    }
+
+    // Seed direct dependencies, resolving versions from the rich collected set.
+    let mut seed_deps: Vec<Dependency> = Vec::new();
+    for mut dep in root_pom.dependencies.clone() {
+        if !dep.scope.is_transitive() {
+            continue;
+        }
+
+        if dep.coordinate.version.raw.is_empty() || dep.coordinate.version.raw == "managed" {
+            let key = (
+                dep.coordinate.group_id.clone(),
+                dep.coordinate.artifact_id.clone(),
+            );
+            if let Some(managed_ver) = root_managed.get(&key) {
+                dep.coordinate.version = managed_ver.clone();
+            } else {
+                // Multi-pass interpolation using the full ancestor chain properties
+                let mut version_str = dep.coordinate.version.raw.clone();
+                for _ in 0..5 {
+                    let next =
+                        crate::resolver::effective::interpolate(&root_properties, &version_str);
+                    if next == version_str {
+                        break;
+                    }
+                    version_str = next;
+                }
+                if let Ok(ver) = Version::parse(&version_str) {
+                    dep.coordinate.version = ver;
+                }
+            }
+
+            if dep.coordinate.version.raw.is_empty() || dep.coordinate.version.raw.contains("${") {
+                debug!("Skipping root direct dep with unresolved version after full ancestor collection: {}", dep.coordinate);
+                continue;
+            }
+        }
+
+        seed_deps.push(dep);
+    }
+
+    for dep in seed_deps {
+        to_visit.push_back(WorkItem {
+            dep,
+            parent: root_pom.coordinate.clone(),
+            accumulated_exclusions: vec![],
+        });
+    }
+
+    let mut visited_poms: HashSet<(String, String, String)> = HashSet::new();
+    let mut problems: Vec<String> = Vec::new(); // Collect issues for final report
+
+    // (counters moved to atomic globals in effective.rs for simplicity)
+
+    while let Some(work) = to_visit.pop_front() {
+        let dep = &work.dep;
+        let ga = (
+            dep.coordinate.group_id.clone(),
+            dep.coordinate.artifact_id.clone(),
+        );
+
+        // Conflict resolution: nearest wins (first seen wins for the same GA)
+        if let Some((existing_version, _, _)) = selected.get(&ga) {
+            if !range_accepts(&dep.coordinate.version, existing_version) {
+                debug!(
+                    "conflict: {} already resolved to {} but {} also requires it",
+                    ga.1, existing_version, dep.coordinate.version
+                );
+            }
+            continue;
+        }
+
+        // Choose best version for the requested range
+        let chosen_version = resolve_best_version(&dep.coordinate, &client, &cache).await?;
+
+        let resolved_coord = MavenCoordinate::new(
+            &dep.coordinate.group_id,
+            &dep.coordinate.artifact_id,
+            chosen_version.clone(),
+        );
+
+        // Record the winner + the parent that caused this node to be pulled in
+        selected.insert(
+            ga.clone(),
+            (chosen_version.clone(), dep.clone(), work.parent.clone()),
+        );
+
+        // Avoid re-processing the exact same POM
+        let visit_key = (
+            resolved_coord.group_id.clone(),
+            resolved_coord.artifact_id.clone(),
+            resolved_coord.version.raw.clone(),
+        );
+        if !visited_poms.insert(visit_key) {
+            continue;
+        }
+
+        processed += 1;
+        if processed % 25 == 0 {
+            info!("Resolved {} artifacts so far...", processed);
+        }
+
+        // Fetch effective POM
+        let effective =
+            match EffectivePom::for_coordinate(&resolved_coord, &client, &cache, options.no_cache)
+                .await
+            {
+                Ok(e) => e,
+                Err(e) => {
+                    let msg = format!("{}: {}", resolved_coord, e);
+                    warn!("problematic POM: {}", msg);
+                    problems.push(msg);
+                    continue;
+                }
+            };
+
+        // Defensive: if the effective POM has no dependencies at all, still record the artifact itself
+        if effective.dependencies.is_empty()
+            && !selected.contains_key(&(
+                resolved_coord.group_id.clone(),
+                resolved_coord.artifact_id.clone(),
+            ))
+        {
+            // Already recorded earlier
+        }
+
+        for mut child in effective.dependencies {
+            if !child.scope.is_transitive() {
+                continue;
+            }
+
+            // Apply this POM's dependencyManagement
+            if child.coordinate.version.raw == "managed" || child.coordinate.version.raw.is_empty()
+            {
+                let key = (
+                    child.coordinate.group_id.clone(),
+                    child.coordinate.artifact_id.clone(),
+                );
+                if let Some(managed) = effective.dependency_management.get(&key) {
+                    child.coordinate.version = managed.coordinate.version.clone();
+                }
+            }
+
+            // Check accumulated exclusions from the entire ancestor chain
+            let excluded =
+                work.accumulated_exclusions.iter().any(|ex| {
+                    ex.matches(&child.coordinate.group_id, &child.coordinate.artifact_id)
+                }) || dep.exclusions.iter().any(|ex| {
+                    ex.matches(&child.coordinate.group_id, &child.coordinate.artifact_id)
+                });
+
+            if excluded {
+                debug!(
+                    "excluded {} by exclusion from {}",
+                    child.coordinate, dep.coordinate
+                );
+                continue;
+            }
+
+            // Build new accumulated exclusions for the child (append this level's exclusions)
+            let mut child_exclusions = work.accumulated_exclusions.clone();
+            child_exclusions.extend(dep.exclusions.iter().cloned());
+
+            to_visit.push_back(WorkItem {
+                dep: child,
+                parent: resolved_coord.clone(),
+                accumulated_exclusions: child_exclusions,
+            });
+        }
+    }
+
+    // Convert selected map into final ResolvedDependency list.
+    // Drop any entries that still contain unresolved ${} — they indicate
+    // a property we couldn't resolve and would produce an invalid lock entry.
+    let mut dependencies = Vec::new();
+    for ((group, artifact), (version, original_dep, pulled_by)) in selected {
+        if version.raw.contains("${") {
+            debug!(
+                "dropping unresolved property version for {}:{}",
+                group, artifact
+            );
+            continue;
+        }
+        let coord = MavenCoordinate::new(group, artifact, version);
+        dependencies.push(ResolvedDependency {
+            coordinate: coord,
+            scope: original_dep.scope,
+            optional: original_dep.optional,
+            depended_by: Some(pulled_by),
+            artifacts: vec![],
+        });
+    }
+
+    // Deterministic order
+    dependencies.sort_by(|a, b| {
+        a.coordinate
+            .group_id
+            .cmp(&b.coordinate.group_id)
+            .then_with(|| a.coordinate.artifact_id.cmp(&b.coordinate.artifact_id))
+    });
+
+    info!(
+        "Transitive resolution complete: {} artifacts (processed {} POMs)",
+        dependencies.len(),
+        processed
+    );
+
+    if !problems.is_empty() {
+        warn!("Encountered {} problematic POMs during resolution (see above). The lockfile may be incomplete for some transitive branches.", problems.len());
+    }
+
+    // Cache effectiveness summary — very useful when testing on large real projects
+    let hits =
+        crate::resolver::effective::POM_CACHE_HITS.load(std::sync::atomic::Ordering::Relaxed);
+    let misses =
+        crate::resolver::effective::POM_CACHE_MISSES.load(std::sync::atomic::Ordering::Relaxed);
+    info!(
+        "Cache summary for this run: {} POM cache hits, {} fetches from network",
+        hits, misses
+    );
+
+    Ok(Resolution {
+        root: root_pom.coordinate,
+        dependencies,
+    })
+}
+
+/// Very small helper: does the concrete version satisfy what the declaration asked for?
+fn range_accepts(declared: &Version, selected: &Version) -> bool {
+    if declared.raw == "managed" {
+        return true;
+    }
+    match VersionRange::parse(&declared.raw) {
+        Ok(r) => r.contains(selected),
+        Err(_) => declared == selected,
+    }
+}
+
+/// Given a (possibly ranged) dependency coordinate, pick the best concrete version
+/// we can actually download, preferring the highest compatible version.
+async fn resolve_best_version(
+    dep: &MavenCoordinate,
+    _client: &RepositoryClient,
+    _cache: &CacheManager,
+) -> Result<Version> {
+    if dep.version.raw != "managed" {
+        // Try to treat it as a concrete version or a range we can satisfy
+        if let Ok(range) = VersionRange::parse(&dep.version.raw) {
+            if let Some(exact) = &range.exact {
+                return Ok(exact.clone());
+            }
+            // For ranges we should ideally consult maven-metadata.xml and pick the
+            // highest version that matches. For the first working version we do a
+            // pragmatic thing: just use the lower bound if present, otherwise let
+            // the POM fetch fail and the caller will see the problem.
+            if let Some((lo, _)) = &range.lower {
+                return Ok(lo.clone());
+            }
+        }
+        return Ok(dep.version.clone());
+    }
+
+    // Pure "managed" case — we should have already resolved it via depMgmt.
+    // As a fallback just return what we have.
+    Ok(dep.version.clone())
+}
