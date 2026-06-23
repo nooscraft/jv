@@ -37,6 +37,9 @@ pub enum JvError {
         details: String,
     },
 
+    #[error("resolution failed for {coordinate}: {reason}")]
+    Resolution { coordinate: String, reason: String },
+
     #[error("cache error at {path:?}: {reason}")]
     Cache { path: PathBuf, reason: String },
 

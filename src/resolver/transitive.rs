@@ -24,6 +24,9 @@ pub struct ResolveOptions {
     pub extra_repositories: Vec<String>,
     /// Bypass reading from the local cache (still writes results).
     pub no_cache: bool,
+    /// Fail immediately on the first POM fetch error instead of collecting
+    /// problems and continuing. Useful in CI where a partial graph is wrong.
+    pub strict: bool,
 }
 
 /// Successful resolution result.
@@ -259,6 +262,12 @@ pub async fn resolve_transitive(pom_path: &Path, options: ResolveOptions) -> Res
                 Err(e) => {
                     let msg = format!("{}: {}", resolved_coord, e);
                     warn!("problematic POM: {}", msg);
+                    if options.strict {
+                        return Err(crate::error::JvError::Resolution {
+                            coordinate: resolved_coord.to_string(),
+                            reason: msg,
+                        });
+                    }
                     problems.push(msg);
                     continue;
                 }
