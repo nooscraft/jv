@@ -260,8 +260,11 @@ pub async fn resolve_transitive(pom_path: &Path, options: ResolveOptions) -> Res
             {
                 Ok(e) => e,
                 Err(e) => {
-                    let msg = format!("{}: {}", resolved_coord, e);
-                    warn!("problematic POM: {}", msg);
+                    let msg = format!(
+                        "{} (required by {}): {}",
+                        resolved_coord, work.parent, e
+                    );
+                    warn!("POM fetch failed — dependency of {}: {}", work.parent, e);
                     if options.strict {
                         return Err(crate::error::JvError::Resolution {
                             coordinate: resolved_coord.to_string(),
