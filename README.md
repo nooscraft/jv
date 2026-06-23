@@ -7,7 +7,7 @@ A fast, Rust-based dependency resolver for Java and the JVM ecosystem.
 ## Highlights
 
 - **Fast dependency resolution** written in Rust
-- **Global, content-addressable cache** — share dependencies across all your projects
+- **Global, coordinate-keyed cache** — share dependencies across all your projects
 - **Parallel artifact downloading** with progress reporting
 - **Deterministic TOML lockfiles** (`jv.lock`)
 - Works with **existing projects** — no migration required
@@ -59,7 +59,7 @@ We are actively hardening the resolver on large, real-world Spring Boot and ente
 
 ## Performance (Early Data)
 
-`jv` is built around three performance pillars: parallel downloads, a global content-addressable cache, and an efficient resolver.
+`jv` is built around three performance pillars: parallel downloads, a global coordinate-keyed cache, and an efficient resolver.
 
 Early structured benchmarks on real multi-module Spring Boot projects show:
 

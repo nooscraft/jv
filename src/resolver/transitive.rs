@@ -39,10 +39,13 @@ pub async fn resolve_transitive(pom_path: &Path, options: ResolveOptions) -> Res
     let root_pom = Pom::parse(&xml)?;
 
     let mut client = RepositoryClient::new();
-    for url in &options.extra_repositories {
-        if let Ok(r) = crate::repository::Repository::new("user", url) {
-            client.add_repository(r);
-        }
+    let extra_repos: Vec<_> = options
+        .extra_repositories
+        .iter()
+        .filter_map(|url| crate::repository::Repository::new("user", url).ok())
+        .collect();
+    for r in extra_repos {
+        client.add_repository(r);
     }
     let cache = CacheManager::new()?;
 
