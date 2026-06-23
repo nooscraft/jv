@@ -45,7 +45,16 @@ async fn main() -> Result<()> {
 
                 let resolution = jv::resolver::resolve_transitive(&file, options).await?;
 
-                println!("Resolved {} artifacts.", resolution.dependencies.len());
+                println!(
+                    "\nResolved {} transitive dependenc{} for {}:",
+                    resolution.dependencies.len(),
+                    if resolution.dependencies.len() == 1 { "y" } else { "ies" },
+                    resolution.root
+                );
+                for dep in &resolution.dependencies {
+                    println!("  {} [{}]", dep.coordinate, dep.scope);
+                }
+                println!();
 
                 if !args.dry_run {
                     let lock = LockFile::from_resolved(&resolution.dependencies);
