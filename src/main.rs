@@ -45,18 +45,14 @@ async fn main() -> Result<()> {
 
                 let resolution = jv::resolver::resolve_transitive(&file, options).await?;
 
-                println!(
-                    "Resolved {} transitive dependencies for {}",
-                    resolution.dependencies.len(),
-                    resolution.root
-                );
+                println!("Resolved {} artifacts.", resolution.dependencies.len());
 
                 if !args.dry_run {
                     let lock = LockFile::from_resolved(&resolution.dependencies);
                     write_lock_file(&args.output, &lock)?;
-                    println!("Lock file written to {}", args.output.display());
+                    println!("Wrote {}", args.output.display());
                 } else {
-                    println!("Dry run - lock file not written.");
+                    println!("Dry run.");
                 }
 
                 // Also demonstrate the old direct path is still available via the library
