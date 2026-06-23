@@ -128,16 +128,10 @@ impl CacheManager {
     }
 
     /// Create a new CacheManager for a specific repository URL.
-    /// Maven Central returns a non-namespaced manager.
-    /// Custom repos get a short hash-based namespace.
-    pub fn for_repository(repo_url: &str) -> Result<Self> {
-        if Self::is_maven_central(repo_url) {
-            Self::new()
-        } else {
-            let hash = format!("{:x}", Sha256::digest(repo_url.as_bytes()));
-            let short_hash = &hash[..12]; // 12 chars is plenty
-            Self::new_with_namespace(Some(short_hash.to_string()))
-        }
+    /// All repositories share the global cache root; the coordinator key
+    /// (group:artifact:version) is already unique across repos.
+    pub fn for_repository(_repo_url: &str) -> Result<Self> {
+        Self::new()
     }
 
     fn is_maven_central(url: &str) -> bool {
